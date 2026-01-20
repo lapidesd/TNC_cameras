@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd /Volumes/NO\ NAME/DCIM/100DSCIM/
+cd /Volumes/NO\_NAME/DCIM/100DSCIM/
 for file in *; do
   # Check if it is a file
   if [ -f "$file" ]; then
