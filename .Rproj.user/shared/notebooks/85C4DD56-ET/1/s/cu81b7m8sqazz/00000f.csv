@@ -1,0 +1,8 @@
+"0","labels <- c(""Cool-Season Recharge"", ""Pre-Monsoon Dry"", ""Monsoon"", ""Post-Monsoon Recession"")"
+"0","cameras <- data.frame(Site = c(""Boquillas"", ""CharlestonMesquite"", ""Contention"", ""Fairbank"", ""Hereford"", ""Hunter"", ""Moson"", ""St.David""), Camera = c(8, 2, 6, 1, 5, 4, 3, 7))"
+"0","modis <- left_join(modis, cameras, by = ""Site"")"
+"0","modis$Date <- as.Date(modis$Date)"
+"0","openet <- left_join(openet, cameras, by = ""Site"")"
+"0","openet$Date <- as.Date(openet$Date)"
+"0","pml <- left_join(pml, cameras, by = ""Site"")"
+"0","pml$Date <- as.Date(pml$Date)"
