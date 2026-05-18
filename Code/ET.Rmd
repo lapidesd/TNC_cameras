@@ -387,3 +387,23 @@ for (s in 1:4) {
 mtext("Seasonal ET Variance Change Points", side = 3, outer = TRUE)
 ```
 
+```{r}
+flow <- read.csv("../Data/USPPFlowMonitoring2006_2025.csv")
+flow$FP <- flow$Flow.Code
+flow$FP[flow$FP == 2] <- 1
+flow <- flow[flow$FP %in% c(0, 1),]
+flow$Date <- as.Date(flow$Date)
+flow <- left_join(flow, cameras, by = "Site")
+flow$WY <- water_year(flow$Date)
+flow$Season <- sapply(as.integer(format(flow$Date, "%m")), season)
+reach <- flow[flow$Camera %in% c(1, 2, 6, 7),]
+reach <- aggregate(FP ~ WY + Season, data = reach, FUN = mean)
+flow_modis <- left_join(reach, seasonal_modis, by = c("WY", "Season"))
+```
+
+```{r}
+modis_mod <- lm(FP ~ ET, data = flow_modis)
+summary(modis_mod)
+```
+
+Estimated coefficient is opposite of expected.
