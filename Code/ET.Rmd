@@ -402,8 +402,29 @@ flow_modis <- left_join(reach, seasonal_modis, by = c("WY", "Season"))
 ```
 
 ```{r}
-modis_mod <- lm(FP ~ ET, data = flow_modis)
+modis_mod <- lm(FP ~ ET, data = flow_modis[flow_modis$Season == 3,])
 summary(modis_mod)
 ```
 
+```{r}
+plot(FP ~ ET, data = flow_modis[flow_modis$Season == 3,])
+abline(modis_mod)
+```
+
 Estimated coefficient is opposite of expected.
+
+```{r}
+s2 <- flow_modis[flow_modis$Season == 2, c("WY", "ET")]
+s3 <- flow_modis[flow_modis$Season == 3, c("WY", "FP")]
+lagged <- left_join(s3, s2, by = "WY")
+
+lagged_mod <- lm(FP ~ ET, data = lagged)
+summary(lagged_mod)
+```
+
+```{r}
+plot(FP ~ ET, data = lagged)
+abline(lagged_mod)
+```
+
+Every additional 1,000 mm of ET in the antecedent pre-monsoon dry season decreases FP by 6.874%.
