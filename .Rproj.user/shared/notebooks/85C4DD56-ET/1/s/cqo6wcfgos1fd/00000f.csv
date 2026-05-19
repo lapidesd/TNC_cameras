@@ -1,0 +1,6 @@
+"0","modis <- modis %>% arrange(Date, Buffer, Camera)"
+"0","modis$Site <- as.factor(modis$Site)"
+"0","openet <- openet %>% arrange(Date, Buffer, Camera)"
+"0","openet$Site <- as.factor(openet$Site)"
+"0","pml <- pml %>% arrange(Date, Buffer, Camera)"
+"0","pml$Site <- as.factor(pml$Site)"
