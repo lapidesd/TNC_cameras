@@ -58,6 +58,8 @@ pml$Site <- as.factor(pml$Site)
 ```
 
 ```{r, message = FALSE}
+camera_filter <- c(1, 2, 6, 7)
+
 water_year <- function(date) {
   y <- as.numeric(format(date, "%Y"))
   m <- as.numeric(format(date, "%m"))
@@ -75,7 +77,7 @@ modis$WY <- water_year(modis$Date)
 modis$Season <- sapply(as.integer(format(modis$Date, "%m")), season)
 
 seasonal_modis <- modis %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter) %>%
   group_by(WY, Season) %>%
   summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
 
@@ -83,7 +85,7 @@ openet$WY <- water_year(openet$Date)
 openet$Season <- sapply(as.integer(format(openet$Date, "%m")), season)
 
 seasonal_openet <- openet %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter) %>%
   group_by(WY, Season) %>%
   summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
 
@@ -91,7 +93,7 @@ pml$WY <- water_year(pml$Date)
 pml$Season <- sapply(as.integer(format(pml$Date, "%m")), season)
 
 seasonal_pml <- pml %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter) %>%
   group_by(WY, Season) %>%
   summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
 ```
@@ -396,7 +398,7 @@ flow$Date <- as.Date(flow$Date)
 flow <- left_join(flow, cameras, by = "Site")
 flow$WY <- water_year(flow$Date)
 flow$Season <- sapply(as.integer(format(flow$Date, "%m")), season)
-reach <- flow[flow$Camera %in% c(1, 2, 6, 7),]
+reach <- flow[flow$Camera %in% camera_filter,]
 reach <- aggregate(FP ~ WY + Season, data = reach, FUN = mean)
 flow_modis <- left_join(reach, seasonal_modis, by = c("WY", "Season"))
 ```
@@ -422,9 +424,11 @@ lagged_mod <- lm(FP ~ ET, data = lagged)
 summary(lagged_mod)
 ```
 
+Lagging by an additional year decreases the coefficient estimate. The estimate is not statistically significant but there's still a negative relationship.
+
 ```{r}
-plot(FP ~ ET, data = lagged)
-abline(lagged_mod)
+plot(FP ~ ET, xlab = "ET (mm)", ylab = "Mean FP", main =  "Mean Monsoon Season FP vs. Pre-Monsoon Dry Season ET", pch = 19, font.main = 1, data = lagged)
+abline(lagged_mod, col = "red")
 ```
 
 Every additional 1,000 mm of ET in the antecedent pre-monsoon dry season decreases FP by 6.874%.
@@ -469,5 +473,27 @@ cor(all_lagged$ET, all_lagged$vpd, use = "complete.obs")
 
 ```{r}
 cor(all_lagged[, -1], use = "complete.obs")
+```
+
+```{r}
+subset <- seasonal_modis[seasonal_modis$Season == 2,]
+cp_mean <- cpt.mean(subset$ET, method = "PELT", minseglen = 10)
+plot(subset$WY, subset$ET,
+     pch = 19, col = "black",
+     xlab = "", ylab = "ET (mm)", main = "Pre-Monsoon Dry Season ET Change-Points", font.main = 1)
+years <- subset$WY[cpts(cp_mean)]
+segments <- c(0, cpts(cp_mean), nrow(subset))
+means <- sapply(1:(length(segments) - 1), function(i) {
+  start <- segments[i] + 1
+  end <- segments[i + 1]
+  mean(subset$ET[start:end])
+})
+sp <- data.frame(
+  x = subset$WY[head(segments, -1) + 1],
+  xend = subset$WY[tail(segments, -1)],
+  y = means,
+  yend = means
+)
+segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
 ```
 
