@@ -1,30 +1,112 @@
 ---
-title: "Untitled"
+title: "Shallow Groundwater"
 author: "Tiffany Le"
 date: "2026-06-11"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r setup, warning = F, message = F}
+library(dplyr)
+
+water_year <- function(date) {
+  y <- as.numeric(format(date, "%Y"))
+  m <- as.numeric(format(date, "%m"))
+  ifelse(m >= 10, y + 1, y)
+}
+
+season <- function(month) {
+  if (month %in% c(12, 1, 2, 3)) return(1)
+  else if (month %in% c(4, 5, 6)) return(2)
+  else if (month %in% c(7, 8, 9)) return(3)
+  else if (month %in% c(10, 11)) return(4)
+}
+
+cameras <- data.frame(
+  Site = c(
+    "Boquillas",
+    "CharlestonMesquite",
+    "Contention",
+    "Fairbank",
+    "Hereford",
+    "Hunter",
+    "Moson",
+    "St.David"
+  ),
+  Camera = c(8, 2, 6, 1, 5, 4, 3, 7)
+)
 ```
 
-## R Markdown
+```{r et, warning = F, message = F}
+points <- read.csv("../Data/pts_for_Jawad.csv")[1:8,]
+points$Name <- gsub(" Camera", "", points$Name)
+points$Index <- seq_len(nrow(points))
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+jawad <- do.call(rbind, lapply(points$Index, function(i) {
+  file <- paste0("../Data/Jawad_ET/J", i, ".csv")
+  df <- read.csv(file)
+  df$Site <- points$Name[i]
+  df
+}))
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+jawad <- merge(jawad, cameras, by = "Site")
+jawad$date <- as.Date(jawad$date)
+jawad$ET <- jawad$LE_model * 0.0353
+jawad$WY <- water_year(jawad$date)
+jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
+jawad <- jawad[order(jawad$Camera, jawad$date), ]
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r gw, warning = F, message = F}
+gw <- read.csv("../Data/ShallowGW2006_2025.csv")
+gw$lev_timestamp <- as.Date(gw$lev_timestamp, format = "%m/%d/%Y")
+gw <- gw %>%
+  filter(site_tp_cd == "GW",
+  parameter_cd == "72019") %>%
+  select(site_no, station_nm, lev_timestamp, lev_va, x, y) %>%
+  arrange(lev_timestamp)
+gw$WY <- water_year(gw$lev_timestamp)
+gw$Season <- sapply(as.integer(format(gw$lev_timestamp, "%m")), season)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r merge, warning = F, message = F}
+mapping <- read.csv("../Data/CamNearest3GWGage.csv")
+names(mapping)[2] <- "Camera"
+et <- jawad %>%
+  left_join(mapping, by = "Camera") %>%
+  left_join(gw, by = c("station" = "station_nm", "WY", "Season")) %>%
+  group_by(Camera, WY, Season) %>%
+  summarise(dtgw = mean(lev_va, na.rm = T), ET = sum(ET, na.rm = T), .groups = "drop")
+```
+
+```{r}
+dry <- et[et$Season == 2,]
+
+dry_lm <- lm(dtgw ~ ET, data = dry)
+summary(dry_lm)
+```
+
+```{r}
+cor(dry$dtgw, dry$ET, use = "complete.obs")
+```
+
+```{r}
+early_dry <- et[et$WY <= 2014,]
+late_dry <- et[et$WY > 2014,]
+
+early_dry_lm <- lm(dtgw ~ ET, data = early_dry)
+summary(early_dry_lm)
+```
+
+```{r}
+late_dry_lm <- lm(dtgw ~ ET, data = late_dry)
+summary(late_dry_lm)
+```
+
+```{r}
+plot(dtgw ~ ET, data = dry)
+```
+
+```{r}
+plot(dtgw ~ WY, data = dry)
+```
+

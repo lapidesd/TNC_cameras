@@ -5,7 +5,7 @@ date: "2026-6-06"
 output: pdf_document
 ---
 
-```{r setup, warning = FALSE, message = FALSE}
+```{r setup, warning = F, message = F}
 library(changepoint)
 
 water_year <- function(date) {
