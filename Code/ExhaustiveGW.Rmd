@@ -1,0 +1,260 @@
+---
+title: "Exhaustive Shallow Groundwater CPD"
+author: "Tiffany Le
+date: "2026-6-18"
+output: pdf_document
+---
+
+```{r setup, warning = F, message = F}
+library(changepoint)
+
+water_year <- function(date) {
+  y <- as.numeric(format(date, "%Y"))
+  m <- as.numeric(format(date, "%m"))
+  ifelse(m >= 10, y + 1, y)
+}
+
+season <- function(month) {
+  if (month %in% c(12, 1, 2, 3)) return(1)
+  else if (month %in% c(4, 5, 6)) return(2)
+  else if (month %in% c(7, 8, 9)) return(3)
+  else if (month %in% c(10, 11)) return(4)
+}
+
+labels <- c("CSR", "PMD", "MON", "PMR")
+
+cameras <- data.frame(
+  Site = c(
+    "Boquillas",
+    "CharlestonMesquite",
+    "Contention",
+    "Fairbank",
+    "Hereford",
+    "Hunter",
+    "Moson",
+    "St.David"
+  ),
+  Camera = c(8, 2, 6, 1, 5, 4, 3, 7)
+)
+```
+
+```{r gw, warning = F, message = F}
+gw <- read.csv("../Data/CamShallowGW2006_2025.csv", stringsAsFactors = FALSE)
+gw$date <- as.Date(gw$date, format = "%m/%d/%Y")
+gw$dtgw <- gw$dtgw * 0.3048
+gw <- gw[order(gw$camera, gw$date), ]
+```
+
+```{r seasons, warning = F, message = F}
+seasonal_gw <- aggregate(dtgw ~ camera + wy + season, data = gw, FUN = mean, na.rm = TRUE)
+```
+
+```{r cpd, warning = F, message = F}
+plot_camera_cpd <- function(cam) {
+  dat <- seasonal_gw[seasonal_gw$camera == cam,]
+  dat <- dat[order(dat$wy),]
+
+  if (nrow(dat) == 0) {
+    message("No seasonal Shallow GW data for camera ", cam)
+    return(invisible(NULL))
+  }
+
+  par(mfrow = c(4, 3), mar = c(4, 5, 1, 1), oma = c(4, 4, 5, 1), cex.axis = 1.0, cex.lab = 1.1, cex.main = 1.1, mgp = c(2.5, 0.7, 0))
+
+  for (s in 1:4) {
+    subset <- dat[dat$season == s,]
+
+    plot(subset$wy, subset$dtgw,
+         pch = 19, col = "black", cex = 1.1,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "Depth to GW (m)",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "s",
+         bty = "l",
+         main = "", font.main = 1, lwd = 1.5)
+    if (s != 4) axis(1, labels = F)
+    if (nrow(subset) >= 4) {
+      cp_mean <- tryCatch(
+        cpt.mean(subset$dtgw, method = "PELT", minseglen = min(8, max(2, floor(nrow(subset) / 2)))),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_mean) && length(cpts(cp_mean)) > 0) {
+        segments_idx <- c(0, cpts(cp_mean), nrow(subset))
+        means <- sapply(seq_len(length(segments_idx) - 1), function(i) {
+          start <- segments_idx[i] + 1
+          end <- segments_idx[i + 1]
+          mean(subset$dtgw[start:end], na.rm = TRUE)
+        })
+        sp <- data.frame(
+          x = subset$wy[head(segments_idx, -1) + 1],
+          xend = subset$wy[tail(segments_idx, -1)],
+          y = means,
+          yend = means
+        )
+        segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
+      } else {
+        abline(h = mean(subset$dtgw, na.rm = TRUE), col = "red", lwd = 2)
+      }
+    }
+    if (s == 1) {
+      mtext("Mean", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+    mtext(labels[s], side = 2, line = 4.5, at = mean(par("usr")[3:4]), cex = 1.2)
+
+    plot(subset$wy, subset$dtgw,
+         pch = 19, col = "black", cex = 1.0,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "n",
+         bty = "l",
+         main = "", font.main = 1)
+    if (s != 4) axis(1, labels = FALSE)
+    axis(2, labels = FALSE)
+    if (nrow(subset) >= 4) {
+      cp_var <- tryCatch(
+        cpt.var(subset$dtgw, method = "PELT", penalty = "AIC"),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_var)) {
+        segments_idx <- c(1, cpts(cp_var) + 1, nrow(subset) + 1)
+        for (i in seq_len(length(segments_idx) - 1)) {
+          j <- segments_idx[i]:(segments_idx[i + 1] - 1)
+          left <- subset$wy[segments_idx[i]]
+          right <- subset$wy[segments_idx[i + 1] - 1]
+          sm <- mean(subset$dtgw[j], na.rm = TRUE)
+          ssd <- sd(subset$dtgw[j], na.rm = TRUE)
+          rect(left, sm - ssd, right, sm + ssd,
+               col = adjustcolor("skyblue", alpha.f = 0.3), border = NA)
+        }
+      }
+    }
+    if (s == 1) {
+      mtext("Variance", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+
+    plot(subset$wy, subset$dtgw,
+         pch = 19, col = "black", cex = 1.0,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "n",
+         bty = "l",
+         main = "", font.main = 1)
+    if (s != 4) axis(1, labels = FALSE)
+    axis(2, labels = FALSE)
+    if (nrow(subset) >= 4) {
+      matrix_reg <- cbind(subset$dtgw, 1, subset$wy)
+      cp_reg <- tryCatch(
+        cpt.reg(matrix_reg, method = "PELT"),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_reg)) {
+        segments_idx <- c(0, cpts(cp_reg), nrow(subset))
+        params <- param.est(cp_reg)
+        colors <- rainbow(max(1, length(segments_idx) - 1))
+        for (i in seq_len(length(colors))) {
+          idx <- (segments_idx[i] + 1):segments_idx[i + 1]
+          intercept <- params$beta[i, 1]
+          slope <- params$beta[i, 2]
+          fitted <- intercept + slope * subset$wy[idx]
+          lines(subset$wy[idx], fitted, col = colors[i], lwd = 2)
+        }
+      }
+    }
+    if (s == 1) {
+      mtext("Regression", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+  }
+
+  mtext(paste("Camera", cam, "Seasonal Shallow Groundwater Change Points"), side = 3, outer = TRUE, line = 3, cex = 1.5)
+}
+```
+
+```{r plots, include = F}
+for (cam in sort(unique(seasonal_gw$camera))) {
+  png(sprintf("../Figures/Exhaustive/gw_cpd_c%01d.png", cam), width = 2100, height = 1800, res = 150)
+  plot_camera_cpd(cam)
+  dev.off()
+}
+```
+
+```{r display, fig.show = 'hold', fig.width = 14, fig.height = 12, warning = F, message = F}
+for (cam in sort(unique(seasonal_gw$camera))) {
+  plot_camera_cpd(cam)
+}
+```
+
+Cameras 2, 3, 4, 5, 6 have CP in PMD 2014-2015.
+
+```{r agg, warning = F, message = F}
+camera_filter <- c(1, 2, 6, 7)
+seasonal_agg <- aggregate(dtgw ~ wy + season,
+                          data = gw[gw$camera %in% camera_filter, ],
+                          FUN = mean, na.rm = TRUE)
+```
+
+```{r reg, warning = F, message = F}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_agg[seasonal_agg$season == s, ]
+  matrix_reg <- cbind(subset$dtgw, 1, subset$wy)
+  cp_reg <- cpt.reg(matrix_reg, method = "PELT")
+  segments_idx <- c(0, cpts(cp_reg), nrow(subset))
+  params <- param.est(cp_reg)
+  plot(subset$wy, subset$dtgw,
+       pch = 19, col = "black",
+       xlab = "", ylab = "Depth to GW (m)", main = labels[s], font.main = 1)
+  colors <- rainbow(length(segments_idx) - 1)
+  for (i in 1:length(colors)) {
+    idx <- (segments_idx[i] + 1):segments_idx[i + 1]
+    intercept <- params$beta[i, 1]
+    slope <- params$beta[i, 2]
+    fitted <- intercept + slope * subset$wy[idx]
+    lines(subset$wy[idx], fitted, col = colors[i], lwd = 2)
+  }
+}
+mtext("Seasonal Shallow GW Regression Change Points", side = 3, outer = TRUE)
+```
+
+```{r mean, warning = F, message = F}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_agg[seasonal_agg$season == s, ]
+  cp_mean <- cpt.mean(subset$dtgw, method = "PELT", minseglen = 4)
+  plot(subset$wy, subset$dtgw,
+       pch = 19, col = "black",
+       xlab = "", ylab = "Depth to GW (m)", main = labels[s], font.main = 1)
+  segments_idx <- c(0, cpts(cp_mean), nrow(subset))
+  means <- sapply(1:(length(segments_idx) - 1), function(i) {
+    start <- segments_idx[i] + 1
+    end <- segments_idx[i + 1]
+    mean(subset$dtgw[start:end])
+  })
+  sp <- data.frame(
+    x = subset$wy[head(segments_idx, -1) + 1],
+    xend = subset$wy[tail(segments_idx, -1)],
+    y = means,
+    yend = means
+  )
+  segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
+}
+mtext("Seasonal Shallow GW Change Points", side = 3, outer = TRUE)
+```
+
+```{r agg_var, warning = F, message = F}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_agg[seasonal_agg$season == s, ]
+  cp_var <- cpt.var(subset$dtgw, method = "PELT", penalty = "AIC")
+  segments_idx <- c(1, cpts(cp_var) + 1, nrow(subset) + 1)
+  plot(subset$wy, subset$dtgw,
+       pch = 19, col = "black",
+       xlab = "", ylab = "Depth to GW (m)", main = labels[s], font.main = 1)
+  for (i in 1:(length(segments_idx) - 1)) {
+    j <- segments_idx[i]:(segments_idx[i + 1] - 1)
+    left  <- subset$wy[segments_idx[i]]
+    right <- subset$wy[segments_idx[i + 1] - 1]
+    sm <- mean(subset$dtgw[j])
+    ssd <- sd(subset$dtgw[j])
+    rect(left, sm - ssd, right, sm + ssd,
+         col = adjustcolor("skyblue", alpha.f = 0.3),
+         border = NA)
+  }
+}
+mtext("Seasonal Shallow GW Variance Change Points", side = 3, outer = TRUE)
+```

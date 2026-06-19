@@ -1,5 +1,5 @@
 ---
-title: "Exhastive ET"
+title: "Exhastive ET CPD"
 author: "Tiffany Le"
 date: "2026-6-06" 
 output: pdf_document
@@ -58,25 +58,8 @@ jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
 jawad <- jawad[order(jawad$Camera, jawad$date), ]
 ```
 
-```{r flow, warning = F, message = F}
-flow <- read.csv("../Data/USPPFlowMonitoring2006_2025.csv", stringsAsFactors = FALSE)
-flow$FP <- flow$Flow.Code
-flow$FP[flow$FP == 2] <- 1
-flow <- flow[flow$FP %in% c(0, 1),]
-flow$Date <- as.Date(flow$Date)
-flow$WY <- water_year(flow$Date)
-flow$Season <- sapply(as.integer(format(flow$Date, "%m")), season)
-flow <- merge(flow, cameras, by = "Site")
-reach <- aggregate(FP ~ Camera + WY + Season, data = flow, FUN = mean)
-count_df <- aggregate(FP ~ Camera + WY + Season, data = flow, FUN = length)
-reach$n <- count_df$FP
-reach$Flowing <- round(reach$FP * reach$n)
-reach$Dry <- reach$n - reach$Flowing
-```
-
 ```{r seasons, warning = F, message = F}
 seasonal_jawad <- aggregate(ET ~ Camera + WY + Season, data = jawad, FUN = sum)
-flow_jawad <- merge(reach, seasonal_jawad, by = c("Camera", "WY", "Season"))
 ```
 
 ```{r cpd, warning = F, message = F}
