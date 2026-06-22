@@ -1,0 +1,2 @@
+seq_len,hidden_size,num_layers,dropout,lr,batch_size
+30.0,128.0,3.0,0.1,0.0006288316298309492,32.0

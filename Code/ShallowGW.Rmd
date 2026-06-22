@@ -230,14 +230,16 @@ plot(lev_va ~ ET, data = sdry)
 plot(lev_va ~ WY, data = sdry)
 ```
 
+7: NA
+6: NA
 1: NA
+8: WP
 2: NA
 3: SN
 4: SN < 2014
 5: N
-6: NA
-7: NA
-8: WP
+
+No significant changes at 4 highly correlated sites. DTGW and ET have the strongest relationship at sites where streamflow is perennial.
 
 ```{r}
 single_raw <- jawad %>%
