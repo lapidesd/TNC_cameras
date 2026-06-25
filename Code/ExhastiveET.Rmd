@@ -1,0 +1,191 @@
+---
+title: "Exhastive ET CPD"
+author: "Tiffany Le"
+date: "2026-6-06" 
+output: pdf_document
+---
+
+```{r setup, warning = F, message = F}
+library(changepoint)
+
+water_year <- function(date) {
+  y <- as.numeric(format(date, "%Y"))
+  m <- as.numeric(format(date, "%m"))
+  ifelse(m >= 10, y + 1, y)
+}
+
+season <- function(month) {
+  if (month %in% c(12, 1, 2, 3)) return(1)
+  else if (month %in% c(4, 5, 6)) return(2)
+  else if (month %in% c(7, 8, 9)) return(3)
+  else if (month %in% c(10, 11)) return(4)
+}
+
+labels <- c("CSR", "PMD", "MON", "PMR")
+
+cameras <- data.frame(
+  Site = c(
+    "Boquillas",
+    "CharlestonMesquite",
+    "Contention",
+    "Fairbank",
+    "Hereford",
+    "Hunter",
+    "Moson",
+    "St.David"
+  ),
+  Camera = c(8, 2, 6, 1, 5, 4, 3, 7)
+)
+```
+
+```{r et, warning = F, message = F}
+points <- read.csv("../Data/pts_for_Jawad.csv")[1:8,]
+points$Name <- gsub(" Camera", "", points$Name)
+points$Index <- seq_len(nrow(points))
+
+jawad <- do.call(rbind, lapply(points$Index, function(i) {
+  file <- paste0("../Data/Jawad_ET/J", i, ".csv")
+  df <- read.csv(file)
+  df$Site <- points$Name[i]
+  df
+}))
+
+jawad <- merge(jawad, cameras, by = "Site")
+jawad$date <- as.Date(jawad$date)
+jawad$ET <- jawad$LE_model * 0.0353
+jawad$WY <- water_year(jawad$date)
+jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
+jawad <- jawad[order(jawad$Camera, jawad$date), ]
+```
+
+```{r seasons, warning = F, message = F}
+seasonal_jawad <- aggregate(ET ~ Camera + WY + Season, data = jawad, FUN = sum)
+```
+
+```{r cpd, warning = F, message = F}
+plot_camera_cpd <- function(cam) {
+  dat <- seasonal_jawad[seasonal_jawad$Camera == cam,]
+  dat <- dat[order(dat$WY),]
+
+  if (nrow(dat) == 0) {
+    message("No seasonal ET data for camera ", cam)
+    return(invisible(NULL))
+  }
+
+  par(mfrow = c(4, 3), mar = c(4, 5, 1, 1), oma = c(4, 4, 5, 1), cex.axis = 1.0, cex.lab = 1.1, cex.main = 1.1, mgp = c(2.5, 0.7, 0))
+
+  for (s in 1:4) {
+    subset <- dat[dat$Season == s,]
+
+    plot(subset$WY, subset$ET,
+         pch = 19, col = "black", cex = 1.1,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "ET (mm)",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "s",
+         bty = "l",
+         main = "", font.main = 1, lwd = 1.5)
+    if (s != 4) axis(1, labels = F)
+    if (nrow(subset) >= 4) {
+      cp_mean <- tryCatch(
+        cpt.mean(subset$ET, method = "PELT", minseglen = min(8, max(2, floor(nrow(subset) / 2)))),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_mean) && length(cpts(cp_mean)) > 0) {
+        segments_idx <- c(0, cpts(cp_mean), nrow(subset))
+        means <- sapply(seq_len(length(segments_idx) - 1), function(i) {
+          start <- segments_idx[i] + 1
+          end <- segments_idx[i + 1]
+          mean(subset$ET[start:end], na.rm = TRUE)
+        })
+        sp <- data.frame(
+          x = subset$WY[head(segments_idx, -1) + 1],
+          xend = subset$WY[tail(segments_idx, -1)],
+          y = means,
+          yend = means
+        )
+        segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
+      }
+    }
+    if (s == 1) {
+      mtext("Mean", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+    mtext(labels[s], side = 2, line = 4.5, at = mean(par("usr")[3:4]), cex = 1.2)
+
+    plot(subset$WY, subset$ET,
+         pch = 19, col = "black", cex = 1.0,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "n",
+         bty = "l",
+         main = "", font.main = 1)
+    if (s != 4) axis(1, labels = FALSE)
+    axis(2, labels = FALSE)
+    if (nrow(subset) >= 4) {
+      cp_var <- tryCatch(
+        cpt.var(subset$ET, method = "PELT", penalty = "AIC"),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_var)) {
+        segments_idx <- c(1, cpts(cp_var) + 1, nrow(subset) + 1)
+        for (i in seq_len(length(segments_idx) - 1)) {
+          j <- segments_idx[i]:(segments_idx[i + 1] - 1)
+          left <- subset$WY[segments_idx[i]]
+          right <- subset$WY[segments_idx[i + 1] - 1]
+          sm <- mean(subset$ET[j], na.rm = TRUE)
+          ssd <- sd(subset$ET[j], na.rm = TRUE)
+          rect(left, sm - ssd, right, sm + ssd,
+               col = adjustcolor("skyblue", alpha.f = 0.3), border = NA)
+        }
+      }
+    }
+    if (s == 1) {
+      mtext("Variance", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+
+    plot(subset$WY, subset$ET,
+         pch = 19, col = "black", cex = 1.0,
+         xlab = ifelse(s == 4, "WY", ""), ylab = "",
+         xaxt = ifelse(s == 4, "s", "n"), yaxt = "n",
+         bty = "l",
+         main = "", font.main = 1)
+    if (s != 4) axis(1, labels = FALSE)
+    axis(2, labels = FALSE)
+    if (nrow(subset) >= 4) {
+      matrix_reg <- cbind(subset$ET, 1, subset$WY)
+      cp_reg <- tryCatch(
+        cpt.reg(matrix_reg, method = "PELT"),
+        error = function(e) NULL
+      )
+      if (!is.null(cp_reg)) {
+        segments_idx <- c(0, cpts(cp_reg), nrow(subset))
+        params <- param.est(cp_reg)
+        colors <- rainbow(max(1, length(segments_idx) - 1))
+        for (i in seq_len(length(colors))) {
+          idx <- (segments_idx[i] + 1):segments_idx[i + 1]
+          intercept <- params$beta[i, 1]
+          slope <- params$beta[i, 2]
+          fitted <- intercept + slope * subset$WY[idx]
+          lines(subset$WY[idx], fitted, col = colors[i], lwd = 2)
+        }
+      }
+    }
+    if (s == 1) {
+      mtext("Regression", side = 3, line = 0.5, outer = FALSE, at = mean(par("usr")[1:2]), cex = 1.2)
+    }
+  }
+
+  mtext(paste("Camera", cam, "Seasonal ET Change Points"), side = 3, outer = TRUE, line = 3, cex = 1.5)
+}
+```
+
+```{r plots, include = F}
+for (cam in sort(unique(jawad$Camera))) {
+  png(sprintf("../Figures/et_cpd_c%01d.png", cam), width = 2100, height = 1800, res = 150)
+  plot_camera_cpd(cam)
+  dev.off()
+}
+```
+
+```{r display, fig.show = 'hold', fig.width = 14, fig.height = 12, warning = F, message = F}
+for (cam in sort(unique(jawad$Camera))) {
+  plot_camera_cpd(cam)
+}
+```

@@ -58,6 +58,8 @@ pml$Site <- as.factor(pml$Site)
 ```
 
 ```{r, message = FALSE}
+camera_filter <- c(1, 2, 6, 7)
+
 water_year <- function(date) {
   y <- as.numeric(format(date, "%Y"))
   m <- as.numeric(format(date, "%m"))
@@ -75,25 +77,34 @@ modis$WY <- water_year(modis$Date)
 modis$Season <- sapply(as.integer(format(modis$Date, "%m")), season)
 
 seasonal_modis <- modis %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter,
+         Buffer == 50) %>%
+  group_by(Date, WY, Season) %>%
+  summarize(ET = mean(ET, na.rm = TRUE)) %>%
   group_by(WY, Season) %>%
-  summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
+  summarise(ET = sum(ET, na.rm = TRUE))
 
 openet$WY <- water_year(openet$Date)
 openet$Season <- sapply(as.integer(format(openet$Date, "%m")), season)
 
 seasonal_openet <- openet %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter,
+         Buffer == 50) %>%
+  group_by(Date, WY, Season) %>%
+  summarize(ET = mean(ET, na.rm = TRUE)) %>%
   group_by(WY, Season) %>%
-  summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
+  summarise(ET = sum(ET, na.rm = TRUE))
 
 pml$WY <- water_year(pml$Date)
 pml$Season <- sapply(as.integer(format(pml$Date, "%m")), season)
 
 seasonal_pml <- pml %>%
-  filter(Camera %in% c(1, 2, 6, 7)) %>%
+  filter(Camera %in% camera_filter,
+         Buffer == 50) %>%
+  group_by(Date, WY, Season) %>%
+  summarize(ET = mean(ET, na.rm = TRUE)) %>%
   group_by(WY, Season) %>%
-  summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
+  summarise(ET = sum(ET, na.rm = TRUE))
 ```
 
 ```{r}
@@ -396,38 +407,49 @@ flow$Date <- as.Date(flow$Date)
 flow <- left_join(flow, cameras, by = "Site")
 flow$WY <- water_year(flow$Date)
 flow$Season <- sapply(as.integer(format(flow$Date, "%m")), season)
-reach <- flow[flow$Camera %in% c(1, 2, 6, 7),]
-reach <- aggregate(FP ~ WY + Season, data = reach, FUN = mean)
+reach <- flow[flow$Camera %in% camera_filter,]
+reach <- aggregate(FP ~ WY + Season, data = reach, FUN = function(x) c(mean = mean(x), n = length(x)))
+reach <- do.call(data.frame, reach)
+names(reach)[3:4] <- c("FP", "n")
+reach$Flowing <- round(reach$FP * reach$n)
+reach$Dry <- reach$n - reach$Flowing 
 flow_modis <- left_join(reach, seasonal_modis, by = c("WY", "Season"))
 ```
 
 ```{r}
-modis_mod <- lm(FP ~ ET, data = flow_modis[flow_modis$Season == 3,])
+monsoon <- flow_modis[flow_modis$Season == 3,]
+modis_mod <- glm(cbind(Flowing, Dry) ~ ET, family = binomial, data = monsoon)
 summary(modis_mod)
 ```
 
 ```{r}
-plot(FP ~ ET, data = flow_modis[flow_modis$Season == 3,])
-abline(modis_mod)
+plot(FP ~ ET, data = monsoon)
+X <- seq(min(monsoon$ET), max(monsoon$ET), length.out = 200)
+pred <- predict(modis_mod, newdata = data.frame(ET = X), type = "response")
+lines(X, pred, col = "red", lwd = 2)
 ```
 
 Estimated coefficient is opposite of expected.
 
 ```{r}
 s2 <- flow_modis[flow_modis$Season == 2, c("WY", "ET")]
-s3 <- flow_modis[flow_modis$Season == 3, c("WY", "FP")]
+s3 <- flow_modis[flow_modis$Season == 3, c("WY", "FP", "Flowing", "Dry")]
 lagged <- left_join(s3, s2, by = "WY")
 
-lagged_mod <- lm(FP ~ ET, data = lagged)
+lagged_mod <- glm(cbind(Flowing, Dry) ~ ET, family = binomial, data = lagged)
 summary(lagged_mod)
 ```
 
+Lagging by an additional year under the linear model decreases the magnitude of the coefficient estimate. The estimate is not statistically significant but there's still a negative relationship.
+
 ```{r}
-plot(FP ~ ET, data = lagged)
-abline(lagged_mod)
+plot(FP ~ ET, xlab = "ET (mm)", ylab = "Mean FP", main =  "Mean Monsoon Season FP vs. Pre-Monsoon Dry Season ET", pch = 19, font.main = 1, data = lagged)
+X <- seq(min(lagged$ET), max(lagged$ET), length.out = 200)
+pred <- predict(lagged_mod, newdata = data.frame(ET = X), type = "response")
+lines(X, pred, col = "red", lwd = 2)
 ```
 
-Every additional 1,000 mm of ET in the antecedent pre-monsoon dry season decreases FP by 6.874%.
+Under linear model, every additional 1,000 mm of ET in the antecedent pre-monsoon dry season decreases FP by 6.874%.
 
 ```{r}
 daymet <- read.csv("../Data/Daymet2006_2024.csv")
@@ -452,12 +474,12 @@ all_lagged <- left_join(lagged, all[all$Season == 3, c("WY", "precip", "vpd", "t
 ```
 
 ```{r}
-all_mod <- lm(FP ~ ET + precip + temp, data = all_lagged)
+all_mod <- glm(cbind(Flowing, Dry) ~ ET + precip + temp, family = binomial, data = all_lagged)
 summary(all_mod)
 ```
 
 ```{r}
-vpd_mod <- lm(FP ~ vpd + precip + temp, data = all_lagged)
+vpd_mod <- glm(cbind(Flowing, Dry) ~ vpd + precip + temp, family = binomial, data = all_lagged)
 summary(vpd_mod)
 ```
 
@@ -471,3 +493,160 @@ cor(all_lagged$ET, all_lagged$vpd, use = "complete.obs")
 cor(all_lagged[, -1], use = "complete.obs")
 ```
 
+```{r}
+subset <- seasonal_modis[seasonal_modis$Season == 2,]
+cp_mean <- cpt.mean(subset$ET, method = "PELT", minseglen = 10)
+plot(subset$WY, subset$ET,
+     pch = 19, col = "black",
+     xlab = "", ylab = "ET (mm)", main = "Pre-Monsoon Dry Season ET Change-Points", font.main = 1)
+years <- subset$WY[cpts(cp_mean)]
+segments <- c(0, cpts(cp_mean), nrow(subset))
+means <- sapply(1:(length(segments) - 1), function(i) {
+  start <- segments[i] + 1
+  end <- segments[i + 1]
+  mean(subset$ET[start:end])
+})
+sp <- data.frame(
+  x = subset$WY[head(segments, -1) + 1],
+  xend = subset$WY[tail(segments, -1)],
+  y = means,
+  yend = means
+)
+segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
+```
+
+```{r}
+points <- read.csv("../Data/pts_for_Jawad.csv")[1:8,]
+points$Name <- gsub(" Camera", "", points$Name, ignore.case = TRUE)
+points$Index <- 1:8
+```
+
+```{r}
+jawad <- do.call(rbind, lapply(seq_along(points$Index), function(k) {
+  i  <- points$Index[k]
+  n <- points$Name[k]
+  
+  file <- paste0("../Data/Jawad_ET/J", i, ".csv")
+  
+  df <- read.csv(file)
+  df$Site <- n
+  df
+}))
+
+jawad <- left_join(jawad, cameras, by = "Site")
+jawad$date <- as.Date(jawad$date)
+jawad$ET <- jawad$LE_model * 0.0353
+jawad <- arrange(jawad, date, Camera)
+```
+
+```{r, message = FALSE}
+jawad$WY <- water_year(jawad$date)
+jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
+
+seasonal_jawad <- jawad %>%
+  filter(Camera %in% camera_filter) %>%
+  group_by(WY, Season) %>%
+  summarise(across(ET, ~ sum(.x, na.rm = TRUE)))
+```
+
+```{r}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_jawad[seasonal_jawad$Season == s,]
+  matrix <- cbind(subset$ET, 1, subset$WY)
+  cp_reg <- cpt.reg(matrix, method = "PELT")
+  segments <- c(0, cpts(cp_reg), nrow(subset))
+  params <- param.est(cp_reg)
+  plot(subset$WY, subset$ET,
+       pch = 19, col = "black",
+       xlab = "", ylab = "ET (mm)", main = labels[s], font.main = 1)
+  colors <- rainbow(length(segments) - 1)
+  for (i in 1:length(colors)) {
+    idx <- (segments[i] + 1):segments[i + 1]
+    intercept <- params$beta[i, 1]
+    slope <- params$beta[i, 2]
+    fitted <- intercept + slope * subset$WY[idx]
+    lines(subset$WY[idx], fitted, col = colors[i], lwd = 2)
+  }
+}
+mtext("Seasonal ET Regression Change Points", side = 3, outer = TRUE)
+```
+
+```{r}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_jawad[seasonal_jawad$Season == s,]
+  cp_mean <- cpt.mean(subset$ET, method = "PELT", minseglen = 8)
+  plot(subset$WY, subset$ET,
+       pch = 19, col = "black",
+       xlab = "", ylab = "ET (mm)", main = labels[s], font.main = 1)
+  years <- subset$WY[cpts(cp_mean)]
+  segments <- c(0, cpts(cp_mean), nrow(subset))
+  means <- sapply(1:(length(segments) - 1), function(i) {
+    start <- segments[i] + 1
+    end <- segments[i + 1]
+    mean(subset$ET[start:end])
+  })
+  sp <- data.frame(
+    x = subset$WY[head(segments, -1) + 1],
+    xend = subset$WY[tail(segments, -1)],
+    y = means,
+    yend = means
+  )
+  segments(sp$x, sp$y, sp$xend, sp$yend, col = "red", lwd = 2)
+}
+mtext("Seasonal ET Change Points", side = 3, outer = TRUE)
+```
+
+```{r}
+par(mfrow = c(2, 2), mar = c(3, 4, 2, 1), oma = c(0, 0, 3, 0))
+for (s in 1:4) {
+  subset <- seasonal_jawad[seasonal_jawad$Season == s, ]
+  cp_var <- cpt.var(subset$ET, method = "PELT", penalty = "AIC")
+  segments <- c(1, cpts(cp_var) + 1, nrow(subset) + 1)
+  plot(subset$WY, subset$ET,
+       pch = 19, col = "black",
+       xlab = "", ylab = "ET (mm)", main = labels[s], font.main = 1)
+  for (i in 1:(length(segments) - 1)) {
+    j <- segments[i]:(segments[i + 1] - 1)
+    left  <- subset$WY[segments[i]]
+    right <- subset$WY[segments[i + 1] - 1]
+    sm <- mean(subset$ET[j])
+    ssd   <- sd(subset$ET[j])
+    bottom <- sm - ssd
+    top    <- sm + ssd
+    rect(left, bottom,
+         right, top,
+         col = adjustcolor("skyblue", alpha.f = 0.3),
+         border = NA)
+  }
+}
+mtext("Seasonal ET Variance Change Points", side = 3, outer = TRUE)
+```
+
+```{r}
+flow_jawad <- left_join(reach, seasonal_jawad, by = c("WY", "Season"))
+s2 <- flow_jawad[flow_jawad$Season == 2, c("WY", "ET")]
+s3 <- flow_jawad[flow_jawad$Season == 3, c("WY", "FP", "Flowing", "Dry")]
+lagged_jawad <- left_join(s3, s2, by = "WY")
+
+all_jawad <- left_join(seasonal_flow, seasonal_jawad, by = c("WY", "Season"))
+all_lagged_jawad <- left_join(lagged_jawad, all_jawad[all_jawad$Season == 3, c("WY", "precip", "vpd", "temp")], by = "WY")
+```
+
+```{r}
+jawad_mod <- glm(cbind(Flowing, Dry) ~ ET, family = binomial, data = lagged_jawad)
+summary(jawad_mod)
+```
+
+```{r}
+plot(FP ~ ET, xlab = "ET (mm)", ylab = "Mean FP", main =  "Mean Monsoon Season FP vs. Pre-Monsoon Dry Season ET", pch = 19, font.main = 1, data = lagged_jawad)
+X <- seq(min(lagged_jawad$ET, na.rm = T), max(lagged_jawad$ET, na.rm = T), length.out = 200)
+pred <- predict(jawad_mod, newdata = data.frame(ET = X), type = "response")
+lines(X, pred, col = "red", lwd = 2)
+```
+
+```{r}
+all_jawad_mod <- glm(cbind(Flowing, Dry) ~ ET + precip + vpd + temp, family = binomial, data = all_lagged_jawad)
+summary(all_jawad_mod)
+```
