@@ -1,0 +1,55 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-123.6421433, 39.729539]
+      },
+      "properties": {
+        "site": "elder"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-123.4902023, 39.561428]
+      },
+      "properties": {
+        "site": "dry"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-122.3495293, 39.151897]
+      },
+      "properties": {
+        "site": "rancho"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-119.2611725, 37.030757]
+      },
+      "properties": {
+        "site": "soap"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-119.1983856, 37.068361]
+      },
+      "properties": {
+        "site": "prov"
+      }
+    }
+  ]
+}
