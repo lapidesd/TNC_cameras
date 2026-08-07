@@ -9,3 +9,5 @@ Data/Eddy_covariance/AMF_US-LS1_FLUXNET_2003-2007_v1.3_r1.zip filter=lfs diff=lf
 Data/Eddy_covariance/AMF_US-CMW_BASE-BADM_3-5 filter=lfs diff=lfs merge=lfs -text
 Data/Eddy_covariance/AMF_US-CMW_BASE-BADM_3-5.zip filter=lfs diff=lfs merge=lfs -text
 Data/Eddy_covariance/* filter=lfs diff=lfs merge=lfs -text
+Data/Eddy_coariance/* filter=lfs diff=lfs merge=lfs -text
+Data/Eddy+covariance/* filter=lfs diff=lfs merge=lfs -text

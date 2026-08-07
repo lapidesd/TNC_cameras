@@ -12,9 +12,9 @@ for file in *; do
     # Rename
     # If the file has no extension, just append _1
     if [ "$base" == "$file" ]; then
-      mv "$file" "/Users/danalapides/Documents/Jupyter/TNC_cameras/Data/photos/${file}_3"
+      mv "$file" "/Users/danalapides/Documents/Jupyter/TNC_cameras/Data/photos/${file}_07132026"
     else
-      mv "$file" "/Users/danalapides/Documents/Jupyter/TNC_cameras/Data/photos/${base}_3.${ext}"
+      mv "$file" "/Users/danalapides/Documents/Jupyter/TNC_cameras/Data/photos/${base}_07132026.${ext}"
     fi
   fi
 done
