@@ -4,3 +4,6 @@
 .Ruserdata
 .positai
 Tuning.pkl
+Data/FI.pkl
+.venv/
+ars/

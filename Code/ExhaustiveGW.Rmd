@@ -39,7 +39,7 @@ cameras <- data.frame(
 ```
 
 ```{r gw, warning = F, message = F}
-gw <- read.csv("../Data/CamShallowGW2006_2025.csv", stringsAsFactors = FALSE)
+gw <- read.csv("../Data/GW/CamShallowGW2006_2025.csv", stringsAsFactors = FALSE)
 gw$date <- as.Date(gw$date, format = "%m/%d/%Y")
 gw$dtgw <- gw$dtgw * 0.3048
 gw <- gw[order(gw$camera, gw$date), ]

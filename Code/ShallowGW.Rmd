@@ -22,7 +22,7 @@ season <- function(month) {
 }
 
 cameras <- data.frame(
-  Site = c(
+  site = c(
     "Boquillas",
     "CharlestonMesquite",
     "Contention",
@@ -32,7 +32,7 @@ cameras <- data.frame(
     "Moson",
     "St.David"
   ),
-  Camera = c(8, 2, 6, 1, 5, 4, 3, 7)
+  camera = c(8, 2, 6, 1, 5, 4, 3, 7)
 )
 ```
 
@@ -44,133 +44,132 @@ points$Index <- seq_len(nrow(points))
 jawad <- do.call(rbind, lapply(points$Index, function(i) {
   file <- paste0("../Data/Jawad_ET/J", i, ".csv")
   et <- read.csv(file)
-  et$Site <- points$Name[i]
+  et$site <- points$Name[i]
   et
 }))
 
-jawad <- merge(jawad, cameras, by = "Site")
+jawad <- merge(jawad, cameras, by = "site")
 jawad$date <- as.Date(jawad$date)
-jawad$ET <- jawad$LE_model * 0.0353
-jawad$WY <- water_year(jawad$date)
-jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
-jawad <- jawad[order(jawad$Camera, jawad$date),]
+jawad$et <- jawad$LE_model * 0.0353
+jawad$wy <- water_year(jawad$date)
+jawad$season <- sapply(as.integer(format(jawad$date, "%m")), season)
+jawad <- jawad[order(jawad$camera, jawad$date),]
 ```
 
 ```{r gw, warning = F, message = F}
-gw <- read.csv("../Data/ShallowGW2006_2025.csv")
+gw <- read.csv("../Data/GW/ShallowGW2006_2025.csv")
 gw$lev_timestamp <- as.Date(gw$lev_timestamp, format = "%m/%d/%Y")
 gw <- gw %>%
   filter(site_tp_cd == "GW", parameter_cd == "72019") %>%
   select(site_no, station_nm, lev_timestamp, lev_va, x, y) %>%
   arrange(lev_timestamp)
-gw$WY <- water_year(gw$lev_timestamp)
-gw$Season <- sapply(as.integer(format(gw$lev_timestamp, "%m")), season)
+gw$wy <- water_year(gw$lev_timestamp)
+gw$season <- sapply(as.integer(format(gw$lev_timestamp, "%m")), season)
 ```
 
 ```{r merge, warning = F, message = F}
-mapping <- read.csv("../Data/CamNearest3GWGage.csv")
-names(mapping)[2] <- "Camera"
+mapping <- read.csv("../Data/GW/CamNearest3GWGage.csv")
 et <- jawad %>%
-  left_join(mapping, by = "Camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "WY", "Season")) %>%
-  group_by(Camera, WY, Season) %>%
-  summarise(dtgw = mean(lev_va, na.rm = T), ET = sum(ET, na.rm = T), .groups = "drop")
+  left_join(mapping, by = "camera") %>%
+  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
+  group_by(camera, wy, season) %>%
+  summarise(dtgw = mean(lev_va, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
 ```
 
 ```{r}
-dry <- et[et$Season == 2,]
+dry <- et[et$season == 2,]
 
-dry_lm <- lm(dtgw ~ ET, data = dry)
+dry_lm <- lm(dtgw ~ et, data = dry)
 summary(dry_lm)
 ```
 
 ```{r}
-cor(dry$dtgw, dry$ET, use = "complete.obs")
+cor(dry$dtgw, dry$et, use = "complete.obs")
 ```
 
 Inverse proportionality unexpected.
 ```{r}
-early_dry <- dry[dry$WY <= 2014,]
-late_dry <- dry[dry$WY > 2014,]
+early_dry <- dry[dry$wy <= 2014,]
+late_dry <- dry[dry$wy > 2014,]
 
-early_dry_lm <- lm(dtgw ~ ET, data = early_dry)
+early_dry_lm <- lm(dtgw ~ et, data = early_dry)
 summary(early_dry_lm)
 ```
 
 ```{r}
-cor(early_dry$dtgw, early_dry$ET, use = "complete.obs")
+cor(early_dry$dtgw, early_dry$et, use = "complete.obs")
 ```
 
 ```{r}
-late_dry_lm <- lm(dtgw ~ ET, data = late_dry)
+late_dry_lm <- lm(dtgw ~ et, data = late_dry)
 summary(late_dry_lm)
 ```
 
 ```{r}
-cor(late_dry$dtgw, late_dry$ET, use = "complete.obs")
+cor(late_dry$dtgw, late_dry$et, use = "complete.obs")
 ```
 
 ```{r}
-plot(dtgw ~ ET, data = dry)
+plot(dtgw ~ et, data = dry)
 ```
 
 ```{r}
-plot(dtgw ~ WY, data = dry)
+plot(dtgw ~ wy, data = dry)
 ```
 
 ```{r}
 cagg <- et %>%
-  group_by(WY, Season) %>%
-  summarise(dtgw = mean(dtgw, na.rm = T), ET = sum(ET, na.rm = T), .groups = "drop")
+  group_by(wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
 ```
 
 ```{r}
-cdry <- cagg[cagg$Season == 2,]
+cdry <- cagg[cagg$season == 2,]
 
-cdry_lm <- lm(dtgw ~ ET, data = cdry)
+cdry_lm <- lm(dtgw ~ et, data = cdry)
 summary(cdry_lm)
 ```
 
 ```{r}
-cor(cdry$dtgw, cdry$ET, use = "complete.obs")
+cor(cdry$dtgw, cdry$et, use = "complete.obs")
 ```
 
 ```{r}
-early_cdry <- cdry[cdry$WY <= 2014,]
-late_cdry <- cdry[cdry$WY > 2014,]
+early_cdry <- cdry[cdry$wy <= 2014,]
+late_cdry <- cdry[cdry$wy > 2014,]
 
-early_cdry_lm <- lm(dtgw ~ ET, data = early_cdry)
+early_cdry_lm <- lm(dtgw ~ et, data = early_cdry)
 summary(early_cdry_lm)
 ```
 
 ```{r}
-late_cdry_lm <- lm(dtgw ~ ET, data = late_cdry)
+late_cdry_lm <- lm(dtgw ~ et, data = late_cdry)
 summary(late_cdry_lm)
 ```
 
 ```{r}
-plot(dtgw ~ ET, data = cdry)
+plot(dtgw ~ et, data = cdry)
 ```
 
 ```{r}
-plot(dtgw ~ ET, data = late_cdry)
+plot(dtgw ~ et, data = late_cdry)
 ```
 
 ```{r}
-plot(dtgw ~ WY, data = cdry)
+plot(dtgw ~ wy, data = cdry)
 ```
 
 ```{r, warning = F}
 et_raw <- jawad %>%
-  left_join(mapping, by = "Camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "WY", "Season"))
+  left_join(mapping, by = "camera") %>%
+  left_join(gw, by = c("station" = "station_nm", "wy", "season"))
 
 par(mfrow = c(1, 3), pin = c(2, 1.5))
 for (c in 1:8) {
   for (s in unique(et_raw$station)) {
-    df <- et_raw[(et_raw$station == s) & (et_raw$Camera == c),]
+    df <- et_raw[(et_raw$station == s) & (et_raw$camera == c),]
     if (nrow(df) == 0 || all(is.na(df$lev_va))) next
-    plot(lev_va ~ lev_timestamp, data = df, main = paste("Camera", c, s))
+    plot(lev_va ~ lev_timestamp, data = df, main = paste("camera", c, s))
   }
 }
 ```
@@ -179,55 +178,55 @@ for (c in 1:8) {
 sig <- c("D-20-21 10AAC2 [FBK-UP]", "D-20-21 15DDB [BOQ-UP]", "D-21-21 13BAB1 [MOSLNS]", "D-22-22 33BBC [HUN-UP]", "D-23-22 04DCD4 [HERUED]", "D-19-21 28ACD [TOM-LI]", "D-19-21 05AAA1 [STD-LI]", "D-20-21 15DBD1 [BOQ-LI]")
 
 single <- jawad %>%
-  left_join(mapping, by = "Camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "WY", "Season")) %>%
+  left_join(mapping, by = "camera") %>%
+  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
   filter(
     station %in% sig,
-    !(Camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
+    !(camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
   ) %>%
-  filter(Camera == 8) %>%
-  group_by(WY, Season) %>%
-  summarise(lev_va = mean(lev_va, na.rm = T), ET = sum(ET, na.rm = T), .groups = "drop")
+  filter(camera == 8) %>%
+  group_by(wy, season) %>%
+  summarise(lev_va = mean(lev_va, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
 ```
 
 
 ```{r}
-sdry <- single[single$Season == 2,]
+sdry <- single[single$season == 2,]
 
-sdry_lm <- lm(lev_va ~ ET, data = sdry)
+sdry_lm <- lm(lev_va ~ et, data = sdry)
 summary(sdry_lm)
 ```
 
 ```{r}
-cor(sdry$lev_va, sdry$ET, use = "complete.obs")
+cor(sdry$lev_va, sdry$et, use = "complete.obs")
 ```
 
 ```{r}
-early_sdry <- sdry[sdry$WY <= 2014,]
-late_sdry <- sdry[sdry$WY > 2014,]
+early_sdry <- sdry[sdry$wy <= 2014,]
+late_sdry <- sdry[sdry$wy > 2014,]
 
-early_sdry_lm <- lm(lev_va ~ ET, data = early_sdry)
+early_sdry_lm <- lm(lev_va ~ et, data = early_sdry)
 summary(early_sdry_lm)
 ```
 
 ```{r}
-cor(early_sdry$lev_va, early_sdry$ET, use = "complete.obs")
+cor(early_sdry$lev_va, early_sdry$et, use = "complete.obs")
 ```
 
 ```{r}
-late_sdry_lm <- lm(lev_va ~ ET, data = late_sdry)
+late_sdry_lm <- lm(lev_va ~ et, data = late_sdry)
 summary(late_sdry_lm)
 ```
 
 ```{r}
-cor(late_sdry$lev_va, late_sdry$ET, use = "complete.obs")
+cor(late_sdry$lev_va, late_sdry$et, use = "complete.obs")
 ```
 ```{r}
-plot(lev_va ~ ET, data = sdry)
+plot(lev_va ~ et, data = sdry)
 ```
 
 ```{r}
-plot(lev_va ~ WY, data = sdry)
+plot(lev_va ~ wy, data = sdry)
 ```
 
 7: NA
@@ -243,16 +242,105 @@ No significant changes at 4 highly correlated sites. DTGW and ET have the strong
 
 ```{r}
 single_raw <- jawad %>%
-  left_join(mapping, by = "Camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "WY", "Season")) %>%
+  left_join(mapping, by = "camera") %>%
+  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
   filter(
     station %in% sig,
-    !(Camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
+    !(camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
   ) %>%
-  select(Site, Camera, station, date, ET, lev_va, WY, Season, latitude, longitude, geometry, dist)
+  transmute(site = site.x, camera, station, date, et, dtgw = lev_va, wy, season, latitude, longitude, geometry, dist)
 ```
 
 ```{r}
-write.csv(single_raw, "../Data/CamShallowGW2006_2025.csv")
+write.csv(single_raw, "../Data/GW/CamShallowGW2006_2025.csv", row.names = FALSE)
 ```
 
+```{r}
+continuous <- read.csv("../Data/GW/C4GW.csv")
+continuous$date <- as.Date(continuous$date)
+continuous$wy <- sapply(continuous$date, water_year)
+continuous$season <- sapply(as.integer(format(continuous$date, "%m")), season)
+continuous <- continuous %>%
+  left_join(
+    jawad %>% select(camera, date, et),
+    by = c("camera", "date")
+  )
+```
+
+```{r}
+gw_lm <- lm(dtgw ~ et, data = continuous)
+summary(gw_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = continuous)
+abline(gw_lm, col = "red")
+```
+
+```{r}
+gwagg <- continuous %>%
+  group_by(wy, season) %>%
+  summarise(et = sum(et, na.rm = TRUE), dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+dry_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 2,])
+summary(dry_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = gwagg[gwagg$season == 2,])
+abline(dry_lm, col = "red")
+```
+
+```{r}
+inter_lm <- lm(gwagg[gwagg$season == 3,]$dtgw ~ gwagg[gwagg$season == 2,]$et)
+summary(inter_lm)
+```
+
+```{r}
+plot(gwagg[gwagg$season == 3,]$dtgw ~ gwagg[gwagg$season == 2,]$et, xlab = "et", ylab = "dtgw")
+abline(inter_lm, col = "red")
+```
+
+```{r}
+monsoon_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 3,])
+summary(monsoon_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = gwagg[gwagg$season == 3,])
+abline(monsoon_lm, col = "red")
+```
+
+```{r}
+cs_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 1,])
+summary(cs_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = gwagg[gwagg$season == 1,])
+abline(cs_lm, col = "red")
+```
+
+```{r}
+pm_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 4,])
+summary(pm_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = gwagg[gwagg$season == 4,])
+abline(pm_lm, col = "red")
+```
+
+```{r}
+ann_lm <- lm(dtgw ~ et, data = gwagg)
+summary(ann_lm)
+```
+
+```{r}
+plot(dtgw ~ et, data = gwagg)
+abline(ann_lm, col = "red")
+```
+
+Simpson's Paradox
