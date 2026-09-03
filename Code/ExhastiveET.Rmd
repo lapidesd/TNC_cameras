@@ -43,28 +43,28 @@ points <- read.csv("../Data/pts_for_Jawad.csv")[1:8,]
 points$Name <- gsub(" Camera", "", points$Name)
 points$Index <- seq_len(nrow(points))
 
-jawad <- do.call(rbind, lapply(points$Index, function(i) {
+pmdl <- do.call(rbind, lapply(points$Index, function(i) {
   file <- paste0("../Data/Jawad_ET/J", i, ".csv")
   df <- read.csv(file)
   df$Site <- points$Name[i]
   df
 }))
 
-jawad <- merge(jawad, cameras, by = "Site")
-jawad$date <- as.Date(jawad$date)
-jawad$ET <- jawad$LE_model * 0.0353
-jawad$WY <- water_year(jawad$date)
-jawad$Season <- sapply(as.integer(format(jawad$date, "%m")), season)
-jawad <- jawad[order(jawad$Camera, jawad$date), ]
+pmdl <- merge(pmdl, cameras, by = "Site")
+pmdl$date <- as.Date(pmdl$date)
+pmdl$ET <- pmdl$LE_model * 0.0353
+pmdl$WY <- water_year(pmdl$date)
+pmdl$Season <- sapply(as.integer(format(pmdl$date, "%m")), season)
+pmdl <- pmdl[order(pmdl$Camera, pmdl$date), ]
 ```
 
 ```{r seasons, warning = F, message = F}
-seasonal_jawad <- aggregate(ET ~ Camera + WY + Season, data = jawad, FUN = sum)
+seasonal_pmdl <- aggregate(ET ~ Camera + WY + Season, data = pmdl, FUN = sum)
 ```
 
 ```{r cpd, warning = F, message = F}
 plot_camera_cpd <- function(cam) {
-  dat <- seasonal_jawad[seasonal_jawad$Camera == cam,]
+  dat <- seasonal_pmdl[seasonal_pmdl$Camera == cam,]
   dat <- dat[order(dat$WY),]
 
   if (nrow(dat) == 0) {
@@ -177,7 +177,7 @@ plot_camera_cpd <- function(cam) {
 ```
 
 ```{r plots, include = F}
-for (cam in sort(unique(jawad$Camera))) {
+for (cam in sort(unique(pmdl$Camera))) {
   png(sprintf("../Figures/et_cpd_c%01d.png", cam), width = 2100, height = 1800, res = 150)
   plot_camera_cpd(cam)
   dev.off()
@@ -185,7 +185,7 @@ for (cam in sort(unique(jawad$Camera))) {
 ```
 
 ```{r display, fig.show = 'hold', fig.width = 14, fig.height = 12, warning = F, message = F}
-for (cam in sort(unique(jawad$Camera))) {
+for (cam in sort(unique(pmdl$Camera))) {
   plot_camera_cpd(cam)
 }
 ```
