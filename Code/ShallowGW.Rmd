@@ -5,9 +5,11 @@ date: "2026-06-11"
 output: pdf_document
 ---
 
-```{r setup, warning = F, message = F}
+```{r}
 library(dplyr)
+```
 
+```{r}
 water_year <- function(date) {
   y <- as.numeric(format(date, "%Y"))
   m <- as.numeric(format(date, "%m"))
@@ -20,6 +22,24 @@ season <- function(month) {
   else if (month %in% c(7, 8, 9)) return(3)
   else if (month %in% c(10, 11)) return(4)
 }
+
+plot_seasons <- function(df, x) {
+  par(mfrow = c(2, 2))
+  formula <- as.formula(paste("dtgw ~", x))
+  for (s in 1:4) {
+    sub <- df[df$season == s,]
+    sub <- sub[is.finite(sub$dtgw) & is.finite(sub[[x]]),]
+    if (nrow(sub) < 3) {
+      plot.new()
+      next
+    }
+    plot(formula, data = sub, main = season_labels[s])
+  }
+}
+```
+
+```{r}
+season_labels <- c("CSR", "PMD", "MON", "PMR")
 
 cameras <- data.frame(
   site = c(
@@ -34,313 +54,239 @@ cameras <- data.frame(
   ),
   camera = c(8, 2, 6, 1, 5, 4, 3, 7)
 )
+
+filter <- c(1, 2, 6, 7)
 ```
 
-```{r et, warning = F, message = F}
+```{r}
 points <- read.csv("../Data/pts_for_Jawad.csv")[1:8,]
 points$Name <- gsub(" Camera", "", points$Name)
 points$Index <- seq_len(nrow(points))
 
-jawad <- do.call(rbind, lapply(points$Index, function(i) {
+pmdl <- do.call(rbind, lapply(points$Index, function(i) {
   file <- paste0("../Data/Jawad_ET/J", i, ".csv")
   et <- read.csv(file)
   et$site <- points$Name[i]
   et
 }))
 
-jawad <- merge(jawad, cameras, by = "site")
-jawad$date <- as.Date(jawad$date)
-jawad$et <- jawad$LE_model * 0.0353
-jawad$wy <- water_year(jawad$date)
-jawad$season <- sapply(as.integer(format(jawad$date, "%m")), season)
-jawad <- jawad[order(jawad$camera, jawad$date),]
-```
+pmdl <- merge(pmdl, cameras, by = "site")
+pmdl$date <- as.Date(pmdl$date)
+pmdl$et <- pmdl$LE_model * 0.0353 # from ft to m
+pmdl$wy <- water_year(pmdl$date)
+pmdl$season <- sapply(as.integer(format(pmdl$date, "%m")), season)
+pmdl <- pmdl[order(pmdl$camera, pmdl$date),]
 
-```{r gw, warning = F, message = F}
-gw <- read.csv("../Data/GW/ShallowGW2006_2025.csv")
-gw$lev_timestamp <- as.Date(gw$lev_timestamp, format = "%m/%d/%Y")
-gw <- gw %>%
-  filter(site_tp_cd == "GW", parameter_cd == "72019") %>%
-  select(site_no, station_nm, lev_timestamp, lev_va, x, y) %>%
-  arrange(lev_timestamp)
-gw$wy <- water_year(gw$lev_timestamp)
-gw$season <- sapply(as.integer(format(gw$lev_timestamp, "%m")), season)
-```
-
-```{r merge, warning = F, message = F}
-mapping <- read.csv("../Data/GW/CamNearest3GWGage.csv")
-et <- jawad %>%
-  left_join(mapping, by = "camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
+et_seasonal <- pmdl %>%
   group_by(camera, wy, season) %>%
-  summarise(dtgw = mean(lev_va, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
+  summarise(et = sum(et, na.rm = TRUE), .groups = "drop")
 ```
 
 ```{r}
-dry <- et[et$season == 2,]
+flow <- read.csv("../Data/USPPFlowMonitoring2006_2025.csv", stringsAsFactors = FALSE)
+flow$Flow.Code[flow$Flow.Code == 2] <- 1
+flow <- flow[flow$Flow.Code %in% c(0, 1),]
+flow$Date <- as.Date(flow$Date)
+flow <- merge(flow, cameras, by.x = "Site", by.y = "site")
+flow$wy <- water_year(flow$Date)
+flow$season <- sapply(as.integer(format(flow$Date, "%m")), season)
 
-dry_lm <- lm(dtgw ~ et, data = dry)
-summary(dry_lm)
+fp <- flow %>%
+  group_by(camera, wy, season) %>%
+  summarise(fp = mean(Flow.Code, na.rm = TRUE), .groups = "drop")
+```
+
+## WHIP DTGW Data
+
+WHIP depth to groundwater data recommended by Fern, averaged across the three nearest wells per camera.
+
+```{r}
+mapping <- read.csv("../Data/GW/CamNearest3GWGage.csv", stringsAsFactors = FALSE)
+
+dtgw <- read.csv("../Data/GW/ShallowGW2006_2025.csv", stringsAsFactors = FALSE) %>%
+  filter(site_tp_cd == "GW", parameter_cd == "72019") %>%
+  select(station_nm, lev_timestamp, lev_va) %>%
+  inner_join(mapping, by = c("station_nm" = "station")) %>%
+  transmute(
+    camera,
+    date = as.Date(lev_timestamp, format = "%m/%d/%Y"),
+    dtgw = lev_va * 0.3048, # from ft to m
+    wy = water_year(date),
+    season = sapply(as.integer(format(date, "%m")), season)
+  ) %>%
+  arrange(camera, date)
 ```
 
 ```{r}
-cor(dry$dtgw, dry$et, use = "complete.obs")
-```
-
-Inverse proportionality unexpected.
-```{r}
-early_dry <- dry[dry$wy <= 2014,]
-late_dry <- dry[dry$wy > 2014,]
-
-early_dry_lm <- lm(dtgw ~ et, data = early_dry)
-summary(early_dry_lm)
-```
-
-```{r}
-cor(early_dry$dtgw, early_dry$et, use = "complete.obs")
-```
-
-```{r}
-late_dry_lm <- lm(dtgw ~ et, data = late_dry)
-summary(late_dry_lm)
-```
-
-```{r}
-cor(late_dry$dtgw, late_dry$et, use = "complete.obs")
-```
-
-```{r}
-plot(dtgw ~ et, data = dry)
-```
-
-```{r}
-plot(dtgw ~ wy, data = dry)
-```
-
-```{r}
-cagg <- et %>%
+fp_seasonal <- fp %>%
+  filter(camera %in% filter) %>%
   group_by(wy, season) %>%
-  summarise(dtgw = mean(dtgw, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
+  summarise(fp = mean(fp, na.rm = TRUE), .groups = "drop")
+
+gw_seasonal <- dtgw %>%
+  filter(camera %in% filter) %>%
+  group_by(wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+plot_seasons(inner_join(fp_seasonal, gw_seasonal, by = c("wy", "season")), "fp")
 ```
+
+FP vs. GW by camera:
 
 ```{r}
-cdry <- cagg[cagg$season == 2,]
+gw_cam <- dtgw %>%
+  group_by(camera, wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
 
-cdry_lm <- lm(dtgw ~ et, data = cdry)
-summary(cdry_lm)
-```
+fp_gw <- inner_join(fp, gw_cam, by = c("camera", "wy", "season"))
 
-```{r}
-cor(cdry$dtgw, cdry$et, use = "complete.obs")
-```
-
-```{r}
-early_cdry <- cdry[cdry$wy <= 2014,]
-late_cdry <- cdry[cdry$wy > 2014,]
-
-early_cdry_lm <- lm(dtgw ~ et, data = early_cdry)
-summary(early_cdry_lm)
-```
-
-```{r}
-late_cdry_lm <- lm(dtgw ~ et, data = late_cdry)
-summary(late_cdry_lm)
-```
-
-```{r}
-plot(dtgw ~ et, data = cdry)
-```
-
-```{r}
-plot(dtgw ~ et, data = late_cdry)
-```
-
-```{r}
-plot(dtgw ~ wy, data = cdry)
-```
-
-```{r, warning = F}
-et_raw <- jawad %>%
-  left_join(mapping, by = "camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "wy", "season"))
-
-par(mfrow = c(1, 3), pin = c(2, 1.5))
-for (c in 1:8) {
-  for (s in unique(et_raw$station)) {
-    df <- et_raw[(et_raw$station == s) & (et_raw$camera == c),]
-    if (nrow(df) == 0 || all(is.na(df$lev_va))) next
-    plot(lev_va ~ lev_timestamp, data = df, main = paste("camera", c, s))
-  }
+for (cam in sort(unique(fp_gw$camera))) {
+  plot_seasons(fp_gw[fp_gw$camera == cam,], "fp")
 }
 ```
 
-```{r, warning = F}
-sig <- c("D-20-21 10AAC2 [FBK-UP]", "D-20-21 15DDB [BOQ-UP]", "D-21-21 13BAB1 [MOSLNS]", "D-22-22 33BBC [HUN-UP]", "D-23-22 04DCD4 [HERUED]", "D-19-21 28ACD [TOM-LI]", "D-19-21 05AAA1 [STD-LI]", "D-20-21 15DBD1 [BOQ-LI]")
+Seasonal ET vs. monsoon GW averaged across cameras 1, 2, 6, 7:
 
-single <- jawad %>%
-  left_join(mapping, by = "camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
-  filter(
-    station %in% sig,
-    !(camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
-  ) %>%
-  filter(camera == 8) %>%
+```{r}
+gw_mon <- dtgw %>%
+  filter(camera %in% filter, season == 3) %>%
+  group_by(wy) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+et_avg <- et_seasonal %>%
+  filter(camera %in% filter) %>%
   group_by(wy, season) %>%
-  summarise(lev_va = mean(lev_va, na.rm = T), et = sum(et, na.rm = T), .groups = "drop")
+  summarise(et = mean(et, na.rm = TRUE), .groups = "drop")
+
+plot_seasons(inner_join(et_avg, gw_mon, by = "wy"), "et")
 ```
 
+Seasonal ET vs. monsoon GW by camera:
 
 ```{r}
-sdry <- single[single$season == 2,]
+gw_mon_cam <- dtgw %>%
+  filter(season == 3) %>%
+  group_by(camera, wy) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
 
-sdry_lm <- lm(lev_va ~ et, data = sdry)
-summary(sdry_lm)
+et_gw <- inner_join(et_seasonal, gw_mon_cam, by = c("camera", "wy"))
+
+for (cam in sort(unique(et_gw$camera))) {
+  plot_seasons(et_gw[et_gw$camera == cam,], "et")
+}
 ```
 
-```{r}
-cor(sdry$lev_va, sdry$et, use = "complete.obs")
-```
+## Continuous DTGW Data
+
+USGS daily well-based depth to groundwater.
 
 ```{r}
-early_sdry <- sdry[sdry$wy <= 2014,]
-late_sdry <- sdry[sdry$wy > 2014,]
-
-early_sdry_lm <- lm(lev_va ~ et, data = early_sdry)
-summary(early_sdry_lm)
-```
-
-```{r}
-cor(early_sdry$lev_va, early_sdry$et, use = "complete.obs")
-```
-
-```{r}
-late_sdry_lm <- lm(lev_va ~ et, data = late_sdry)
-summary(late_sdry_lm)
-```
-
-```{r}
-cor(late_sdry$lev_va, late_sdry$et, use = "complete.obs")
-```
-```{r}
-plot(lev_va ~ et, data = sdry)
-```
-
-```{r}
-plot(lev_va ~ wy, data = sdry)
-```
-
-7: NA
-6: NA
-1: NA
-8: WP
-2: NA
-3: SN
-4: SN < 2014
-5: N
-
-No significant changes at 4 highly correlated sites. DTGW and ET have the strongest relationship at sites where streamflow is perennial.
-
-```{r}
-single_raw <- jawad %>%
-  left_join(mapping, by = "camera") %>%
-  left_join(gw, by = c("station" = "station_nm", "wy", "season")) %>%
-  filter(
-    station %in% sig,
-    !(camera == 8 & station == "D-20-21 15DDB [BOQ-UP]")
-  ) %>%
-  transmute(site = site.x, camera, station, date, et, dtgw = lev_va, wy, season, latitude, longitude, geometry, dist)
-```
-
-```{r}
-write.csv(single_raw, "../Data/GW/CamShallowGW2006_2025.csv", row.names = FALSE)
-```
-
-```{r}
-continuous <- read.csv("../Data/GW/C4GW.csv")
-continuous$date <- as.Date(continuous$date)
-continuous$wy <- sapply(continuous$date, water_year)
-continuous$season <- sapply(as.integer(format(continuous$date, "%m")), season)
-continuous <- continuous %>%
-  left_join(
-    jawad %>% select(camera, date, et),
-    by = c("camera", "date")
+dtgw_continuous <- read.csv("../Data/GW/C4GW.csv", stringsAsFactors = FALSE) %>%
+  mutate(
+    date = as.Date(date),
+    camera = as.integer(camera),
+    wy = water_year(date),
+    season = sapply(as.integer(format(date, "%m")), season)
   )
 ```
 
-```{r}
-gw_lm <- lm(dtgw ~ et, data = continuous)
-summary(gw_lm)
-```
+FP vs. GW for C4:
 
 ```{r}
-plot(dtgw ~ et, data = continuous)
-abline(gw_lm, col = "red")
+gw_cam <- dtgw_continuous %>%
+  group_by(camera, wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+fp_gw <- inner_join(fp, gw_cam, by = c("camera", "wy", "season"))
+
+plot_seasons(fp_gw[fp_gw$camera == 4,], "fp")
 ```
 
+Seasonal ET vs. monsoon GW for C4:
+
 ```{r}
-gwagg <- continuous %>%
+gw_mon_cam <- dtgw_continuous %>%
+  filter(season == 3) %>%
+  group_by(camera, wy) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+et_gw <- inner_join(et_seasonal, gw_mon_cam, by = c("camera", "wy"))
+
+plot_seasons(et_gw[et_gw$camera == 4,], "et")
+```
+
+## Groundwater Level Delta Data
+
+Height above the lowest recorded reading from the nearest USGS gauge to each camera with data following 2017.
+
+```{r}
+gw_delta <- read.csv("../Data/GW/CamSPRNCA_GW.csv", stringsAsFactors = FALSE) %>%
+  rename(dtgw = dtgw_m) %>%
+  mutate(
+    date = as.Date(datetime),
+    wy = water_year(date),
+    season = sapply(as.integer(format(date, "%m")), season)
+  ) %>%
+  arrange(camera, date)
+```
+
+FP vs. GW averaged across cameras 1, 2, 6, 7:
+
+```{r}
+fp_seasonal <- fp %>%
+  filter(camera %in% filter) %>%
   group_by(wy, season) %>%
-  summarise(et = sum(et, na.rm = TRUE), dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+  summarise(fp = mean(fp, na.rm = TRUE), .groups = "drop")
+
+gw_seasonal <- gw_delta %>%
+  filter(camera %in% filter) %>%
+  group_by(wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+plot_seasons(inner_join(fp_seasonal, gw_seasonal, by = c("wy", "season")), "fp")
 ```
+
+FP vs. GW by camera:
 
 ```{r}
-dry_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 2,])
-summary(dry_lm)
+gw_cam <- gw_delta %>%
+  group_by(camera, wy, season) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+fp_gw <- inner_join(fp, gw_cam, by = c("camera", "wy", "season"))
+
+for (cam in sort(unique(fp_gw$camera))) {
+  plot_seasons(fp_gw[fp_gw$camera == cam,], "fp")
+}
 ```
+
+Seasonal ET vs. monsoon GW averaged across cameras 1, 2, 6, 7:
 
 ```{r}
-plot(dtgw ~ et, data = gwagg[gwagg$season == 2,])
-abline(dry_lm, col = "red")
+gw_mon <- gw_delta %>%
+  filter(camera %in% filter, season == 3) %>%
+  group_by(wy) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
+
+et_avg <- et_seasonal %>%
+  filter(camera %in% filter) %>%
+  group_by(wy, season) %>%
+  summarise(et = mean(et, na.rm = TRUE), .groups = "drop")
+
+plot_seasons(inner_join(et_avg, gw_mon, by = "wy"), "et")
 ```
+
+Seasonal ET vs. monsoon GW by camera:
 
 ```{r}
-inter_lm <- lm(gwagg[gwagg$season == 3,]$dtgw ~ gwagg[gwagg$season == 2,]$et)
-summary(inter_lm)
-```
+gw_mon_cam <- gw_delta %>%
+  filter(season == 3) %>%
+  group_by(camera, wy) %>%
+  summarise(dtgw = mean(dtgw, na.rm = TRUE), .groups = "drop")
 
-```{r}
-plot(gwagg[gwagg$season == 3,]$dtgw ~ gwagg[gwagg$season == 2,]$et, xlab = "et", ylab = "dtgw")
-abline(inter_lm, col = "red")
-```
+et_gw <- inner_join(et_seasonal, gw_mon_cam, by = c("camera", "wy"))
 
-```{r}
-monsoon_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 3,])
-summary(monsoon_lm)
+for (cam in sort(unique(et_gw$camera))) {
+  plot_seasons(et_gw[et_gw$camera == cam,], "et")
+}
 ```
-
-```{r}
-plot(dtgw ~ et, data = gwagg[gwagg$season == 3,])
-abline(monsoon_lm, col = "red")
-```
-
-```{r}
-cs_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 1,])
-summary(cs_lm)
-```
-
-```{r}
-plot(dtgw ~ et, data = gwagg[gwagg$season == 1,])
-abline(cs_lm, col = "red")
-```
-
-```{r}
-pm_lm <- lm(dtgw ~ et, data = gwagg[gwagg$season == 4,])
-summary(pm_lm)
-```
-
-```{r}
-plot(dtgw ~ et, data = gwagg[gwagg$season == 4,])
-abline(pm_lm, col = "red")
-```
-
-```{r}
-ann_lm <- lm(dtgw ~ et, data = gwagg)
-summary(ann_lm)
-```
-
-```{r}
-plot(dtgw ~ et, data = gwagg)
-abline(ann_lm, col = "red")
-```
-
-Simpson's Paradox
