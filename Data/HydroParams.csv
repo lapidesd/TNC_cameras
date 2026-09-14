@@ -1,0 +1,2 @@
+seq_len,hidden_size,num_layers,dropout,lr,batch_size,best_rmse
+32,120,3,0.05,0.0007059301711879509,64,0.12804271151778035
