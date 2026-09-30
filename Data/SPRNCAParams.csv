@@ -1,0 +1,2 @@
+seq_len,hidden_size,num_layers,dropout,lr,log2_batch,batch_size,val_bce
+84,224,3,0.5,0.00011388594160092837,9,512,0.10236961193459138
