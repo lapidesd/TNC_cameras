@@ -18,9 +18,9 @@ def groundwater_gages():
     return (
         pd.read_csv(DATA / "GW" / "CamSPRNCA_GW.csv", dtype={"site_no": str})
         .drop_duplicates("site_no")
-        .rename(columns={"site_no": "Name", "dec_lat_va": "Latitude", "dec_long_va": "Longitude"})
-        [["Name", "Latitude", "Longitude"]]
-        .assign(Gage="GW")
+        .rename(columns={"site_no": "Name", "dec_lat_va": "Latitude", "dec_long_va": "Longitude", "camera": "Camera"})
+        [["Name", "Latitude", "Longitude", "Camera"]]
+        .assign(Gage="GW", Source="USGS")
     )
 
 def stream_gages():
@@ -33,6 +33,7 @@ def stream_gages():
             "Latitude": sites.geometry.y,
             "Longitude": sites.geometry.x,
             "Gage": "Q",
+            "Source": "USGS",
         }
     )
 
@@ -46,9 +47,9 @@ def precipitation_gages():
 
 def main():
     gages = pd.concat(
-        [groundwater_gages(), stream_gages(), precipitation_gages(), FLUX_TOWERS.assign(Gage="ET")],
+        [groundwater_gages(), stream_gages(), precipitation_gages(), FLUX_TOWERS.assign(Gage="ET", Source="AmeriFlux")],
         ignore_index=True,
-    )[["Gage", "Name", "Latitude", "Longitude"]]
+    )[["Gage", "Source", "Name", "Camera", "Latitude", "Longitude"]].astype({"Camera": "Int64"})
     gages.to_csv(MAP / "Gages.csv", index=False)
     print(gages.groupby("Gage").size().to_string())
 
