@@ -267,3 +267,116 @@ results_df <- bind_rows(
          segment_end_year, intercept, slope, mean, sd)
 
 write.csv(results_df, file = "Data/msn_cpd_results.csv", row.names = FALSE)
+
+seasonal_cameras <- c(1, 2, 4, 6, 7)
+seasonal_wy <- 2007:2025
+season_names <- c(`4` = "PMR", `1` = "CSR", `2` = "PMD", `3` = "MSN")
+season_position <- c(`4` = 0, `1` = 1, `2` = 2, `3` = 3)
+
+add_seasons <- function(df, dates) {
+  df$WY <- water_year(dates)
+  df$Season <- sapply(as.integer(format(dates, "%m")), season)
+  df
+}
+
+pred_fp <- read.csv("Data/SPRNCAPredFP.csv", stringsAsFactors = FALSE)
+pred_fp$date <- as.Date(pred_fp$date)
+pred_fp <- add_seasons(pred_fp, pred_fp$date) %>% left_join(camera_map, by = c("site" = "Site"))
+
+seasonal_fp <- pred_fp %>%
+  filter(Camera %in% seasonal_cameras) %>%
+  group_by(Camera, WY, Season) %>%
+  summarise(value = mean(fp_final, na.rm = TRUE), .groups = "drop")
+
+decimal_year <- function(dates) {
+  y <- as.numeric(format(dates, "%Y"))
+  jan1 <- as.Date(paste0(y, "-01-01"))
+  y + as.numeric(dates - jan1) / as.numeric(as.Date(paste0(y + 1, "-01-01")) - jan1)
+}
+
+raw_start <- as.Date("2006-10-01")
+raw_end <- as.Date("2025-09-30")
+
+raw_climate <- read.csv("Data/Daymet2006_2025.csv", stringsAsFactors = FALSE)
+raw_climate$date <- as.Date(raw_climate$date, format = "%m/%d/%Y")
+raw_climate <- raw_climate %>% filter(camera %in% seasonal_cameras)
+
+nagler_raw <- read.csv("Data/ET/NaglerET.csv", header = FALSE, skip = 7, stringsAsFactors = FALSE)
+nagler_cols <- list(Fairbank = c(4, 37), CharlestonMesquite = c(4, 25), Hunter = c(4, 13),
+                    Contention = c(55, 58), St.David = c(55, 64))
+raw_et <- bind_rows(lapply(names(nagler_cols), function(site) {
+  cols <- nagler_cols[[site]]
+  data.frame(
+    Site = site,
+    date = as.Date(nagler_raw[[cols[1]]], format = "%m/%d/%Y") + 8,
+    value = suppressWarnings(as.numeric(nagler_raw[[cols[2]]])),
+    stringsAsFactors = FALSE
+  )
+})) %>%
+  left_join(camera_map, by = "Site")
+
+raw_gw <- read.csv("Data/GW/CamSPRNCA_GW.csv", stringsAsFactors = FALSE) %>%
+  filter(camera %in% seasonal_cameras) %>%
+  mutate(date = as.Date(datetime), gw_mm = height_abv_lowest_ft * 0.3048 * 1000) %>%
+  group_by(Camera = camera, date) %>%
+  summarise(value = min(gw_mm, na.rm = TRUE), .groups = "drop")
+
+raw_series_df <- bind_rows(
+  pred_fp %>% filter(Camera %in% seasonal_cameras) %>% transmute(Camera = as.character(Camera), date, value = fp_final, variable = "FP_daily"),
+  raw_climate %>% transmute(Camera = as.character(camera), date, value = prcp, variable = "precip"),
+  raw_climate %>% transmute(Camera = as.character(camera), date, value = tvpd, variable = "vpd"),
+  raw_et %>% transmute(Camera = as.character(Camera), date, value, variable = "et"),
+  raw_gw %>% transmute(Camera = as.character(Camera), date, value, variable = "gw")
+) %>%
+  filter(date >= raw_start, date <= raw_end, is.finite(value)) %>%
+  mutate(
+    WY = water_year(date),
+    season = unname(season_names[as.character(sapply(as.integer(format(date, "%m")), season))]),
+    t = decimal_year(date)
+  )
+
+seasonal_series_df <- seasonal_fp %>%
+  filter(WY %in% seasonal_wy, is.finite(value)) %>%
+  transmute(
+    Camera = as.character(Camera), date = as.Date(NA), value, variable = "FP", WY,
+    season = unname(season_names[as.character(Season)]),
+    t = WY - 0.25 + 0.25 * season_position[as.character(Season)]
+  ) %>%
+  bind_rows(raw_series_df) %>%
+  arrange(variable, Camera, t)
+
+seasonal_pen <- "AIC"
+seasonal_minseglen <- function(t) max(3, round(4 * length(t) / diff(range(t))))
+
+seasonal_breaks <- function(x, t, method) {
+  msl <- seasonal_minseglen(t)
+  cp <- tryCatch(
+    switch(method,
+      regression = cpt.reg(cbind(x, 1, t), method = "PELT", penalty = seasonal_pen, minseglen = msl),
+      variance = cpt.var(x, method = "PELT", penalty = seasonal_pen, minseglen = msl),
+      mean = cpt.mean(x / sd(x), method = "PELT", penalty = seasonal_pen, minseglen = msl)
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(cp)) return(integer(0))
+  cpts(cp)
+}
+
+seasonal_breakpoints_df <- seasonal_series_df %>%
+  group_by(variable, Camera) %>%
+  group_modify(function(df, key) {
+    bind_rows(lapply(c("regression", "variance", "mean"), function(m) {
+      idx <- seasonal_breaks(df$value, df$t, m)
+      data.frame(method = rep(m, length(idx)), bp_t = df$t[idx], bp_date = df$date[idx],
+                 WY = df$WY[idx], season = df$season[idx], stringsAsFactors = FALSE)
+    }))
+  }) %>%
+  ungroup()
+
+seasonal_results_df <- bind_rows(
+  seasonal_series_df %>% mutate(type = "series"),
+  seasonal_breakpoints_df %>% mutate(type = "breakpoint")
+) %>%
+  select(type, variable, Camera, method, WY, season, date, t, value, bp_t, bp_date)
+
+write.csv(seasonal_results_df, file = "Data/seasonal_cpd_results.csv", row.names = FALSE)
