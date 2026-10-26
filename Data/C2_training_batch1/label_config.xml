@@ -1,0 +1,7 @@
+<View>
+  <Image name="image" value="$image" zoom="true"/>
+  <PolygonLabels name="label" toName="image">
+    <Label value="water" background="#1f77ff"/>
+    <Label value="wet_mud" background="#ff8c00"/>
+  </PolygonLabels>
+</View>
