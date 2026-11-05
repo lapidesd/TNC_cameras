@@ -10,12 +10,10 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 START_WY <- 2006
 END_WY <- 2025
-N_PERM <- 9999
 TAG_X <- c(0.041, 0.535)
 TAG_Y <- c(0.8775, 0.4475)
 MIN_COVERAGE_MEAN <- 0.90
 MIN_COVERAGE_TOTAL <- 0.98
-set.seed(42)
 
 cameras <- data.frame(
   camera = c(1, 2, 4, 6, 7),
@@ -66,8 +64,7 @@ seasonal_aggregate <- function(daily, statistic, min_coverage, complete_through 
   out %>% select(camera, WY, Season, value) %>% arrange(camera, Season, WY)
 }
 
-fp_daily <- read.csv(file.path(root, "Data", "PredFP.csv"), stringsAsFactors = FALSE) %>%
-  select(-camera) %>%
+fp_daily <- read.csv(file.path(root, "Data", "SPRNCAPredFP.csv"), stringsAsFactors = FALSE) %>%
   inner_join(cameras, by = "site") %>%
   transmute(camera, date = as.Date(date), value = fp_final)
 
@@ -118,40 +115,28 @@ series <- list(
   gw = seasonal_aggregate(gw_daily, "min", 0, complete_through = max(gw_daily$date))
 )
 
-permutation_slope_p <- function(x, y, n_perm = N_PERM) {
-  xc <- x - mean(x)
-  denom <- sum(xc^2)
-  observed <- abs(sum(xc * y) / denom)
-  permuted <- replicate(n_perm, abs(sum(xc * sample(y)) / denom))
-  (sum(permuted >= observed - 1e-12 * max(1, observed)) + 1) / (n_perm + 1)
-}
-
 find_change_points <- function(n, detect) {
   if (n < 6) return(integer(0))
   cps <- tryCatch(suppressWarnings(detect()), error = function(e) integer(0))
   as.integer(cps[cps >= 1 & cps < n])
 }
 
+seasonal_minseglen <- function(x) max(3, round(4 * length(x) / diff(range(x))))
+
 analyze_series <- function(x, y) {
   n <- length(y)
-  reg_cps <- find_change_points(n, function() cpts(cpt.reg(cbind(y, 1, x), method = "PELT")))
+  mean_cps <- find_change_points(n, function() {
+    cpts(cpt.mean(y / sd(y), method = "PELT", penalty = "AIC", minseglen = seasonal_minseglen(x)))
+  })
   var_cps <- find_change_points(n, function() cpts(cpt.var(y, method = "PELT", penalty = "AIC")))
   boundary_x <- function(cps) (x[cps] + x[cps + 1]) / 2
 
-  reg_ends <- c(reg_cps, n)
-  reg_starts <- c(1, reg_cps + 1)
-  regression <- bind_rows(lapply(seq_along(reg_starts), function(i) {
-    idx <- reg_starts[i]:reg_ends[i]
-    if (length(idx) < 2) return(NULL)
-    xs <- x[idx]
-    ys <- y[idx]
-    slope <- sum((xs - mean(xs)) * (ys - mean(ys))) / sum((xs - mean(xs))^2)
-    intercept <- mean(ys) - slope * mean(xs)
-    data.frame(
-      segment = i, x0 = min(xs), x1 = max(xs), n = length(idx),
-      intercept = intercept, slope = slope,
-      p = if (length(idx) >= 3) permutation_slope_p(xs, ys) else NA_real_
-    ) %>% mutate(y0 = intercept + slope * x0, y1 = intercept + slope * x1)
+  mean_ends <- c(mean_cps, n)
+  mean_starts <- c(1, mean_cps + 1)
+  mean_segments <- bind_rows(lapply(seq_along(mean_starts), function(i) {
+    if (n == 0) return(NULL)
+    idx <- mean_starts[i]:mean_ends[i]
+    data.frame(segment = i, x0 = min(x[idx]), x1 = max(x[idx]), n = length(idx), mean = mean(y[idx]))
   }))
 
   var_starts <- c(1, var_cps + 1)
@@ -168,8 +153,8 @@ analyze_series <- function(x, y) {
   }))
 
   list(
-    regression = regression, variance = variance,
-    reg_breaks = boundary_x(reg_cps), var_breaks = boundary_x(var_cps)
+    mean = mean_segments, variance = variance,
+    mean_breaks = boundary_x(mean_cps), var_breaks = boundary_x(var_cps)
   )
 }
 
@@ -189,16 +174,15 @@ panel_plot <- function(df, fit, spec, title, is_fp) {
       inherit.aes = FALSE, fill = color, alpha = 0.18
     )
   }
-  breaks <- c(fit$reg_breaks, fit$var_breaks)
+  breaks <- c(fit$mean_breaks, fit$var_breaks)
   if (length(breaks) > 0) {
     p <- p + geom_vline(xintercept = breaks, linetype = "dashed", linewidth = 0.4, alpha = 0.6)
   }
-  if (nrow(fit$regression) > 0) {
-    lines <- fit$regression %>% mutate(lty = ifelse(!is.na(p) & p < 0.05, "solid", "dashed"))
+  if (nrow(fit$mean) > 0) {
     p <- p + geom_segment(
-      data = lines, aes(x = x0, xend = x1, y = y0, yend = y1, linetype = lty),
+      data = fit$mean, aes(x = x0, xend = x1, y = mean, yend = mean),
       inherit.aes = FALSE, color = color, linewidth = 1
-    ) + scale_linetype_identity()
+    )
   }
   p +
     geom_point(shape = 21, size = 3, fill = color, color = "black", stroke = 0.6) +
@@ -232,18 +216,17 @@ for (var in names(variables)) {
 
       results[[length(results) + 1]] <- bind_rows(
         df %>% transmute(type = "series", camera, variable = var, season = s, WY, value),
-        if (length(c(fit$reg_breaks, fit$var_breaks)) > 0) {
+        if (length(c(fit$mean_breaks, fit$var_breaks)) > 0) {
           data.frame(
             type = "breakpoint", camera = cam, variable = var, season = s,
-            method = rep(c("regression", "variance"), c(length(fit$reg_breaks), length(fit$var_breaks))),
-            bp_year = c(fit$reg_breaks, fit$var_breaks)
+            method = rep(c("mean", "variance"), c(length(fit$mean_breaks), length(fit$var_breaks))),
+            bp_year = c(fit$mean_breaks, fit$var_breaks)
           )
         },
-        if (nrow(fit$regression) > 0) {
-          fit$regression %>% transmute(
-            type = "regression_segment", camera = cam, variable = var, season = s,
-            segment_id = segment, segment_start_year = x0, segment_end_year = x1,
-            n, intercept, slope, p_permutation = p
+        if (nrow(fit$mean) > 0) {
+          fit$mean %>% transmute(
+            type = "mean_segment", camera = cam, variable = var, season = s,
+            segment_id = segment, segment_start_year = x0, segment_end_year = x1, n, mean
           )
         },
         if (nrow(fit$variance) > 0) {
