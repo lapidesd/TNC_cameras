@@ -10,8 +10,6 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 START_WY <- 2006
 END_WY <- 2025
-TAG_X <- c(0.041, 0.535)
-TAG_Y <- c(0.8775, 0.4475)
 MIN_COVERAGE_MEAN <- 0.90
 MIN_COVERAGE_TOTAL <- 0.98
 
@@ -62,6 +60,24 @@ seasonal_aggregate <- function(daily, statistic, min_coverage, complete_through 
   if (statistic == "total") out$value <- out$value * out$expected / out$n
   if (!is.null(complete_through)) out <- out %>% filter(season_end <= complete_through)
   out %>% select(camera, WY, Season, value) %>% arrange(camera, Season, WY)
+}
+
+annual_info <- calendar %>%
+  group_by(WY) %>%
+  summarise(expected = n(), wy_end = max(date), .groups = "drop")
+
+annual_aggregate <- function(daily, statistic, min_coverage, complete_through = NULL) {
+  agg <- switch(statistic, mean = mean, total = sum, min = min)
+  out <- daily %>%
+    filter(!is.na(value)) %>%
+    mutate(WY = water_year(date)) %>%
+    group_by(camera, WY) %>%
+    summarise(n = n(), value = agg(value), .groups = "drop") %>%
+    left_join(annual_info, by = "WY") %>%
+    filter(n / expected >= min_coverage, WY >= START_WY, WY <= END_WY)
+  if (statistic == "total") out$value <- out$value * out$expected / out$n
+  if (!is.null(complete_through)) out <- out %>% filter(wy_end <= complete_through)
+  out %>% select(camera, WY, value) %>% arrange(camera, WY)
 }
 
 fp_daily <- read.csv(file.path(root, "Data", "SPRNCAPredFP.csv"), stringsAsFactors = FALSE) %>%
@@ -115,6 +131,15 @@ series <- list(
   gw = seasonal_aggregate(gw_daily, "min", 0, complete_through = max(gw_daily$date))
 )
 
+annual <- list(
+  et = annual_aggregate(et_daily, "total", MIN_COVERAGE_TOTAL),
+  temp = annual_aggregate(temp_daily, "mean", MIN_COVERAGE_MEAN),
+  fp = annual_aggregate(fp_daily, "mean", MIN_COVERAGE_MEAN),
+  precip = annual_aggregate(precip_daily, "total", MIN_COVERAGE_TOTAL),
+  vpd = annual_aggregate(vpd_daily, "mean", MIN_COVERAGE_MEAN),
+  gw = annual_aggregate(gw_daily, "min", 0, complete_through = max(gw_daily$date))
+)
+
 find_change_points <- function(n, detect) {
   if (n < 6) return(integer(0))
   cps <- tryCatch(suppressWarnings(detect()), error = function(e) integer(0))
@@ -164,7 +189,7 @@ y_limits <- function(y, is_fp) {
   c(min(y) - 0.10 * span, max(y) + 0.15 * span)
 }
 
-panel_plot <- function(df, fit, spec, title, is_fp) {
+panel_plot <- function(df, fit, spec, title, is_fp, title_size = 12, tag_x = 0.02) {
   color <- spec$color
   p <- ggplot(df, aes(WY, value))
   if (nrow(fit$variance) > 0) {
@@ -195,11 +220,39 @@ panel_plot <- function(df, fit, spec, title, is_fp) {
     labs(x = NULL, y = spec$ylab, title = title) +
     theme_classic(base_size = 12) +
     theme(
-      plot.title = element_text(size = 12, hjust = 0.5),
+      plot.title = element_text(size = title_size, hjust = 0.5),
+      plot.tag = element_text(size = 13),
+      plot.tag.location = "plot",
+      plot.tag.position = c(tag_x, 1),
       plot.margin = margin(t = 5.5, r = 5.5, b = 5.5, l = 16),
       axis.text = element_text(color = "black"),
       panel.grid = element_blank()
     )
+}
+
+fit_records <- function(df, fit, cam, var, s) {
+  bind_rows(
+    df %>% transmute(type = "series", camera = cam, variable = var, season = s, WY, value),
+    if (length(c(fit$mean_breaks, fit$var_breaks)) > 0) {
+      data.frame(
+        type = "breakpoint", camera = cam, variable = var, season = s,
+        method = rep(c("mean", "variance"), c(length(fit$mean_breaks), length(fit$var_breaks))),
+        bp_year = c(fit$mean_breaks, fit$var_breaks)
+      )
+    },
+    if (nrow(fit$mean) > 0) {
+      fit$mean %>% transmute(
+        type = "mean_segment", camera = cam, variable = var, season = s,
+        segment_id = segment, segment_start_year = x0, segment_end_year = x1, n, mean
+      )
+    },
+    if (nrow(fit$variance) > 0) {
+      fit$variance %>% transmute(
+        type = "variance_segment", camera = cam, variable = var, season = s,
+        segment_id = segment, segment_start_year = xmin, segment_end_year = xmax, n, mean, sd
+      )
+    }
+  )
 }
 
 results <- list()
@@ -208,58 +261,35 @@ for (var in names(variables)) {
   spec <- variables[[var]]
   for (i in seq_len(nrow(cameras))) {
     cam <- cameras$camera[i]
-    panels <- list()
+
+    # Top panel: annual (water-year) aggregate; season = 0 in the results CSV
+    df <- annual[[var]] %>% filter(camera == cam) %>% arrange(WY)
+    fit <- analyze_series(df$WY, df$value)
+    panels <- list(panel_plot(df, fit, spec, "Annual", is_fp = var == "fp", title_size = 14, tag_x = 0.01))
+    results[[length(results) + 1]] <- fit_records(df, fit, cam, var, 0)
+
     for (s in 1:4) {
       df <- series[[var]] %>% filter(camera == cam, Season == s) %>% arrange(WY)
       fit <- analyze_series(df$WY, df$value)
-      panels[[s]] <- panel_plot(df, fit, spec, season_labels[s], is_fp = var == "fp")
-
-      results[[length(results) + 1]] <- bind_rows(
-        df %>% transmute(type = "series", camera, variable = var, season = s, WY, value),
-        if (length(c(fit$mean_breaks, fit$var_breaks)) > 0) {
-          data.frame(
-            type = "breakpoint", camera = cam, variable = var, season = s,
-            method = rep(c("mean", "variance"), c(length(fit$mean_breaks), length(fit$var_breaks))),
-            bp_year = c(fit$mean_breaks, fit$var_breaks)
-          )
-        },
-        if (nrow(fit$mean) > 0) {
-          fit$mean %>% transmute(
-            type = "mean_segment", camera = cam, variable = var, season = s,
-            segment_id = segment, segment_start_year = x0, segment_end_year = x1, n, mean
-          )
-        },
-        if (nrow(fit$variance) > 0) {
-          fit$variance %>% transmute(
-            type = "variance_segment", camera = cam, variable = var, season = s,
-            segment_id = segment, segment_start_year = xmin, segment_end_year = xmax, n, mean, sd
-          )
-        }
-      )
+      panels[[s + 1]] <- panel_plot(df, fit, spec, season_labels[s], is_fp = var == "fp")
+      results[[length(results) + 1]] <- fit_records(df, fit, cam, var, s)
     }
 
-    figure <- wrap_plots(panels, nrow = 2, ncol = 2) +
+    figure <- wrap_plots(panels, design = "AA\nBC\nDE", heights = c(0.75, 0.65, 0.65)) +
       plot_annotation(
-        title = sprintf("%s (C%d)", cameras$name[i], cam),
-        subtitle = sprintf("Seasonal %s Change-Points", spec$title),
+        title = sprintf("%s Change-Points at %s (C%d)", spec$title, cameras$name[i], cam),
+        tag_levels = "a", tag_suffix = ")",
         theme = theme(
-          plot.title = element_text(size = 18, hjust = 0.5),
-          plot.subtitle = element_text(size = 13, hjust = 0.5, margin = margin(b = 25)),
+          plot.title = element_text(size = 18, hjust = 0.5, margin = margin(b = 20)),
           plot.margin = margin(t = 19, r = 5.5, b = 20, l = 5.5)
         )
       )
 
     canvas <- ggdraw(patchworkGrob(figure))
-    for (k in 1:4) {
-      canvas <- canvas + draw_label(
-        paste0(letters[k], ")"), x = TAG_X[(k - 1) %% 2 + 1], y = TAG_Y[(k - 1) %/% 2 + 1],
-        hjust = 0, vjust = 0.5, size = 13
-      )
-    }
     if (var == "fp") canvas <- canvas + draw_label("*GF", x = 0.99, y = 0.012, hjust = 1, vjust = 0, size = 12)
 
     file <- file.path(out_dir, sprintf("%s_cpd_c%d.png", var, cam))
-    ggsave(file, canvas, width = 13, height = 10, dpi = 300, bg = "white", device = ragg::agg_png)
+    ggsave(file, canvas, width = 11, height = 11, dpi = 300, bg = "white", device = ragg::agg_png)
     cat(sprintf("saved %s\n", basename(file)))
   }
 }
